@@ -161,7 +161,7 @@
   const TRAIL_N = 14;
   const rs = {
     run: null, trail: new Float32Array(TRAIL_N * 3), head: 0, count: 0, sample: 0,
-    wasGrounded: true, squash: 0, stretch: 0, rot: 0, lastT: 0, dt: 0.016,
+    wasGrounded: true, sv: 0, sp: 0, rot: 0, lastT: 0, dt: 0.016,
     secIdx: -1, banner: null, blinkT: 2.5, blink: 0,
     gemSet: new Set(), // 이번 판에 먹은 젬 번호(엔진이 state.gems 배열을 안 줄 때 대비)
   };
@@ -183,7 +183,7 @@
     if (!st) return;
     playerCenter(st, pc);
     if (rs.run !== run) {
-      rs.run = run; rs.count = 0; rs.head = 0; rs.wasGrounded = true; rs.squash = 0; rs.stretch = 0; rs.rot = 0;
+      rs.run = run; rs.count = 0; rs.head = 0; rs.wasGrounded = true; rs.sv = 0; rs.sp = 0; rs.rot = 0;
       rs.banner = null; rs.secIdx = sectionAt(level, st.x);
       rs.gemSet.clear();
     }
@@ -199,11 +199,15 @@
     }
     // 착지/점프 감지 → 찌그러짐/늘어남
     const gr = !!st.grounded;
-    if (gr && !rs.wasGrounded) { rs.squash = 1; rs.stretch = 0; }
-    if (!gr && rs.wasGrounded && (st.vy || 0) > 0) { rs.stretch = 1; rs.squash = 0; }
+    // 스프링(살짝 튕기며 돌아옴): sv<0 = 납작, sv>0 = 길쭉
+    if (gr && !rs.wasGrounded) { rs.sv = -1; rs.sp = 0; }
+    if (!gr && rs.wasGrounded && (st.vy || 0) > 0) { rs.sv = 0.8; rs.sp = 0; }
     rs.wasGrounded = gr;
-    rs.squash = Math.max(0, rs.squash - dt * 6);
-    rs.stretch = Math.max(0, rs.stretch - dt * 4.5);
+    {
+      const h = Math.min(dt, 1 / 30);
+      rs.sp += (-260 * rs.sv - 16 * rs.sp) * h; rs.sv += rs.sp * h;
+      if (Math.abs(rs.sv) < 0.002 && Math.abs(rs.sp) < 0.02) { rs.sv = 0; rs.sp = 0; }
+    }
     // 대체 회전(엔진이 rot을 안 줄 때)
     if (typeof st.rot !== 'number') {
       if (!gr) rs.rot += dt * 7.2;
@@ -407,9 +411,11 @@
     ctx.strokeStyle = rgba(theme.accent, 0.22); ctx.lineWidth = 1.5;
     if (w > 16 && h > 16) { ctx.strokeRect(x + 6, y + 6, w - 12, h - 12); }
     ctx.beginPath(); ctx.rect(x, y, w, h);
-    neonStroke(ctx, theme.accent, 2 + pulse * 0.8, false);
-    // 윗면 하이라이트
-    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fillRect(x + 2, y, w - 4, 2);
+    ctx.strokeStyle = rgba(theme.accent, 0.5); ctx.lineWidth = 2; ctx.stroke();
+    // 윗면: 밟을 수 있는 면을 밝게 강조
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+    neonStroke(ctx, theme.accent, 3 + pulse * 0.6, false);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(x + 2, y, w - 4, 2);
   }
   function drawSpike(ctx, o, theme, pulse) {
     const w = o.w || 40, h = o.h || 40, x = o.x, y0 = o.y || 0;
@@ -556,19 +562,20 @@
     }
     txt(ctx, 'FINISH', L + 60, -300, 22, rgba('#ffffff', 0.8), { stroke: 4 });
   }
+  // 체크포인트: 바닥에 꽂힌 깃발(먹이 다이아몬드와 다른 모양)
   function drawCheckpoints(ctx, cps, t) {
     if (!cps || !cps.length) return;
-    const s = SIZE();
     for (let i = 0; i < cps.length; i++) {
-      const c = cps[i];
-      const cx = c.x + s / 2, cy = -(c.y + s / 2) - 50 + Math.sin(t * 3 + i) * 3;
-      const last = i === cps.length - 1;
-      glow(ctx, cx, cy, 0.5, CP_COL, last ? 0.7 : 0.3);
-      ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.PI / 4 + (last ? t * 1.5 : 0));
-      ctx.beginPath(); ctx.rect(-8, -8, 16, 16);
-      ctx.fillStyle = rgba(CP_COL, last ? 0.6 : 0.25); ctx.fill();
-      ctx.strokeStyle = CP_COL; ctx.lineWidth = 2; ctx.stroke();
-      ctx.restore();
+      const c = cps[i], last = i === cps.length - 1;
+      const px = c.x, py = -(c.y || 0), top = py - 58;
+      ctx.fillStyle = KEYLINE; ctx.fillRect(px - 2, top - 1, 5, 60);
+      ctx.fillStyle = rgba('#ffffff', last ? 0.85 : 0.45); ctx.fillRect(px - 0.5, top, 2, 58);
+      const wv = Math.sin(t * 5 + i) * 2.5;
+      ctx.beginPath(); ctx.moveTo(px + 1, top); ctx.quadraticCurveTo(px + 12, top + 2 + wv, px + 24, top + 8 + wv * 0.5);
+      ctx.lineTo(px + 1, top + 17); ctx.closePath();
+      ctx.lineJoin = 'round'; ctx.strokeStyle = KEYLINE; ctx.lineWidth = 4; ctx.stroke();
+      ctx.fillStyle = last ? CP_COL : rgba(CP_COL, 0.35); ctx.fill();
+      if (last) glow(ctx, px + 10, top + 8, 0.35, CP_COL, 0.4);
     }
   }
 
@@ -638,10 +645,10 @@
     ctx.fillStyle = rgba('#000000', 0.45 * (1 - hgt));
     ctx.beginPath(); ctx.ellipse(pc.x, 2, s * 0.55 * (1 - hgt * 0.5), 4, 0, 0, TAU); ctx.fill();
     glow(ctx, pc.x, -pc.y, 0.75, PLAYER_COL, 0.3);
-    const sqX = 1 + 0.28 * rs.squash - 0.16 * rs.stretch;
-    const sqY = 1 - 0.3 * rs.squash + 0.24 * rs.stretch;
+    const sv = Math.max(-1.2, Math.min(1.2, rs.sv));
+    const sqX = 1 - 0.18 * sv, sqY = 1 + 0.22 * sv;
     ctx.save(); ctx.translate(pc.x, -(pc.y - s / 2));
-    drawCube(ctx, s, curRot(st), sqX, sqY, { vy: st.vy || 0, blink: rs.blink > 0 });
+    drawCube(ctx, s, curRot(st), sqX, sqY, { vy: st.vy || 0, blink: rs.blink > 0 || rs.sv < -0.45 });
     ctx.restore();
   }
 
@@ -756,6 +763,8 @@
     PLAYER_SX, DEFAULT_THEME, PLAYER_COL, GEM_COLS,
     world, newCam, updateCam, playerCenter,
     // 이번 판에 먹은 젬 표시(엔진이 state.gems 배열을 주면 없어도 됨). 판이 바뀌면 자동 초기화
+    // 2단 점프 등에서 큐브를 '통' 늘려줌
+    kick(v) { rs.sv = v == null ? 1 : v; rs.sp = 0; },
     gemTaken(gi) { if (gi != null) rs.gemSet.add(gi); },
     background: (ctx, theme, camX, camY) => drawBackground(ctx, Object.assign({}, DEFAULT_THEME, theme || {}), camX || 0, camY || 0, nowSec(), getBeat(null)),
     beat: getBeat,

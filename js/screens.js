@@ -718,7 +718,7 @@
       const ex = (e.x != null ? e.x : st.x) + S / 2, ey = e.y != null ? e.y : st.y;
       switch (e.type) {
         case 'jump': A.sfx('jump'); pl.jumps++; f && f.jumpRing(ex, ey, R.PLAYER_COL); break;
-        case 'djump': A.sfx('djump'); pl.jumps++; f && f.doubleJumpSparkle(ex, ey + S / 2); break;
+        case 'djump': A.sfx('djump'); pl.jumps++; f && f.doubleJumpSparkle(ex, ey + S / 2); R.kick && R.kick(1); break;
         case 'land': A.sfx('land'); f && f.landDust(ex, ey, th.accent, 0.8); break;
         case 'orb': A.sfx('orb'); f && f.orbBurst(e.ox != null ? e.ox : ex, e.oy != null ? e.oy : ey + S / 2); G.vibrate && G.vibrate(10); break;
         case 'pad': A.sfx('pad'); f && f.padBurst(e.ox != null ? e.ox : ex, e.oy != null ? e.oy : ey); G.vibrate && G.vibrate(10); break;
