@@ -320,7 +320,7 @@
   // ───────────────────────── LV5 임계점 (160bpm, 480px/s, 1박 180px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv5', name: '임계점', track: 'lv5', bpm: 160, speed: 480, beats: 213,
-    theme: { bg: '#12000a', bg2: '#2a0016', accent: '#ff2d6b', accent2: '#fff23d', ground: '#2e0014', scene: 'ruins' },
+    theme: { bg: '#12000a', bg2: '#2a0016', accent: '#ff4fd8', accent2: '#fff23d', ground: '#2e0014', scene: 'ruins' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(6, '점화');
