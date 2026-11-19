@@ -60,7 +60,7 @@
     G.pwa.prompt = () => {
       const d = deferred; if (!d) return;
       deferred = null; G.pwa.prompt = null;
-      d.prompt();
+      try { const r = d.prompt(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* 무시 */ }
       if (d.userChoice) d.userChoice.then(r => { if (r && r.outcome === 'accepted') installedNow = true; }).catch(() => {});
     };
   });

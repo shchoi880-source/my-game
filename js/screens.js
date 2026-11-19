@@ -288,7 +288,12 @@
   function installApp() {
     A.sfx('click');
     const p = G.pwa || {};
-    if (p.prompt) { p.prompt(); return; }
+    if (p.prompt) {
+      p.prompt();
+      // 설치 창이 안 뜨는 폰도 있어서(설치가 멈춘 기록 등) 항상 수동 방법도 함께 안내
+      toast('창이 안 뜨면: ⋮ 메뉴 → 앱 설치 / 홈 화면에 추가', 6);
+      return;
+    }
     const ua = navigator.userAgent || '';
     const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
     if (ios) toast(/CriOS|FxiOS|EdgiOS|KAKAOTALK|NAVER/.test(ua) ? 'Safari로 열고 → 공유(□↑) → 홈 화면에 추가' : '아래 공유 버튼(□↑) → 홈 화면에 추가', 6);
