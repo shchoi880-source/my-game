@@ -1,6 +1,6 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'nd-4';
+const VERSION = 'nd-5';
 const CACHE = 'neondash-' + VERSION;
 const SFX = ['back', 'bigboom', 'book', 'chop', 'click', 'coin', 'confirm', 'door', 'draw', 'equip', 'error', 'explode', 'fire', 'gold', 'hit', 'hurt', 'kill', 'laser', 'latch', 'open', 'page', 'potion', 'shield', 'slash', 'slash2', 'step'];
 const ASSETS = [
@@ -8,6 +8,7 @@ const ASSETS = [
   './js/core.js', './js/audio.js', './js/levels.js', './js/gems.js','./js/engine.js', './js/render.js', './js/screens.js', './js/main.js',
   './assets/fx.png', './assets/fx.json', './assets/kenney-future.ttf',
   './icons/icon-192.png', './icons/icon-512.png',
+  './icons/icon-maskable-192.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon-180.png',
 ].concat(SFX.map(n => './assets/sfx/' + n + '.ogg'));
 
 self.addEventListener('install', e => {
