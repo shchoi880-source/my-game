@@ -498,22 +498,22 @@
     ctx.restore();
     if (((t * 0.7 + o.x * 0.001) % 1) < 0.15) G.spr && G.spr('star_04', cx + 8, cy - 9, { scale: 0.35, tint: '#ffffff', add: true, alpha: 0.9, rot: t * 3 });
   }
-  // 리듬 젬: 작은(≈14px) 네온 다이아몬드. 흔들림 + 박자 맥동 + 반 박마다 색 순환
-  const GEM_COLS = ['#29f0ff', '#ff3df2', '#ffe14d', '#3dffb0'];
+  // 리듬 젬: 또렷한 흰 다이아몬드(어두운 테두리 + 금빛 후광). 색이 바뀌지 않아 눈이 덜 피곤함
+  const GEM_COLS = ['#ffe680', '#ffe680', '#ffe680', '#ffe680'];
   function drawGem(ctx, o, t, bt, theme, gi) {
-    const half = Math.floor(bt.beat * 2);
-    const col = GEM_COLS[(half + gi) & 3];
-    const cx = o.x, cy = -o.y + Math.sin(t * 4 + o.x * 0.02) * 3;
-    const s = 1 + 0.18 * bt.pulse;
-    const hw = 6 * s, hh = 8.5 * s;
-    glow(ctx, cx, cy, 0.32 + 0.12 * bt.pulse, col, 0.75);
-    ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx + hw, cy); ctx.lineTo(cx, cy + hh); ctx.lineTo(cx - hw, cy); ctx.closePath();
-    ctx.fillStyle = rgba(col, 0.55); ctx.fill();
-    ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 5; ctx.stroke();
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
-    // 윗면 반짝임
-    ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx + hw * 0.5, cy - hh * 0.2); ctx.lineTo(cx, cy); ctx.lineTo(cx - hw * 0.5, cy - hh * 0.2); ctx.closePath();
-    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+    const col = '#ffe680';
+    const cx = o.x, cy = -o.y + Math.sin(t * 3 + o.x * 0.02) * 2.5;
+    const s = 1 + 0.1 * bt.pulse;
+    const hw = 10 * s, hh = 13.5 * s;
+    glow(ctx, cx, cy, 0.5, col, 0.55);
+    const path = (w, h) => { ctx.beginPath(); ctx.moveTo(cx, cy - h); ctx.lineTo(cx + w, cy); ctx.lineTo(cx, cy + h); ctx.lineTo(cx - w, cy); ctx.closePath(); };
+    // 어두운 바깥 테두리: 밝은 배경 위에서도 윤곽이 보이게
+    path(hw, hh); ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(6,8,24,0.9)'; ctx.lineWidth = 6; ctx.stroke();
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+    // 안쪽 흰 면
+    path(hw * 0.5, hh * 0.5); ctx.fillStyle = '#ffffff'; ctx.fill();
   }
   function starPath(ctx, x, y, R, r, n) {
     ctx.beginPath();
@@ -677,6 +677,8 @@
       ctx.translate(px, py); ctx.scale(z, z); ctx.translate(-px, -py);
     }
     drawBackground(ctx, theme, cam.x, cam.y, t, bt);
+    // 배경을 살짝 눌러서 장애물·먹이가 배경 불빛과 섞이지 않게
+    ctx.fillStyle = 'rgba(2,3,10,0.38)'; ctx.fillRect(-20, -20, W + 40, H + 40);
     ctx.save();
     ctx.translate(-cam.x, GROUND_Y + cam.y);
     const x0 = cam.x - 120, x1 = cam.x + W + 120;
