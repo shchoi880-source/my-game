@@ -17,7 +17,7 @@
     spikeScale: 0.7,   // 가시 판정 삼각형 = 시각 삼각형을 무게중심 기준 70%
     sawScale: 0.85,    // 톱날 판정 반지름 비율
     nearDist: 12,      // 니어미스 거리
-    orbR: 26, coinR: 22, padW: 40, padH: 10,
+    orbR: 26, coinR: 22, padW: 40, padH: 10, gemR: 18,
     fallDeath: -300,
     rotSpeed: Math.PI * 2 / 0.6, // 공중 회전 속도(rad/s) — 기본 점프 한 번에 약 1바퀴
   };
@@ -84,13 +84,14 @@
   // 레벨 오브젝트 → 런 전용 복사본 + x 정렬 + 구멍 병합
   function prep(level) {
     const src = level.objects || [];
-    const objects = [], list = [], gapsRaw = [];
+    const objects = [], list = [], gapsRaw = [], gems = [];
     let coinIdx = 0;
     for (let i = 0; i < src.length; i++) {
       const o = src[i];
       const c = Object.assign({}, o);
       objects.push(c);
       if (o.t === 'gap') { if (o.w > 0) gapsRaw.push([o.x, o.x + o.w]); continue; }
+      if (o.t === 'gem') { gems.push(c); continue; }   // 젬은 물리/충돌과 완전히 분리
       const k = KIND[o.t];
       if (!k) continue;
       c._k = k;
@@ -124,7 +125,9 @@
       else { g0.push(g[0]); g1.push(g[1]); }
     }
     const saws = list.filter(c => c._k === K_SAW);
-    return { objects, list, xMin, pm, gap0: Float64Array.from(g0), gap1: Float64Array.from(g1), saws, coinCount: coinIdx };
+    gems.sort((a, b) => a.x - b.x);
+    gems.forEach((c, i) => { c.gi = i; c.got = false; c.missed = false; });
+    return { objects, list, xMin, pm, gap0: Float64Array.from(g0), gap1: Float64Array.from(g1), saws, coinCount: coinIdx, gems };
   }
 
   function create(level, opts) {
@@ -142,9 +145,37 @@
       grounded: true, jumpsLeft: 1, dead: false, done: false,
       progress: 0, coins: [false, false, false], rot: 0,
       cause: null, killer: null, // 사망 원인/오브젝트 (추가 필드)
+      gems: 0, combo: 0, maxCombo: 0, score: 0, // 리듬 젬 (물리와 무관)
     };
     // 내부 상태
     let coyoteT = 0, buf = 0, pending = false, lastOrb = -1, acc = 0;
+    // 젬: x 정렬 배열 + 포인터. gst: 0 미결, 1 획득, 2 놓침, 3 시작 지점 뒤(무효)
+    const gems = P.gems, ngem = gems.length, gst = new Uint8Array(ngem), GR = PHYS.gemR;
+    let gp = 0;
+    while (gp < ngem && gems[gp].x + GR < startX) { gst[gp] = 3; gp++; }
+
+    function updateGems() {
+      const x0 = s.x, x1 = x0 + S, y0 = s.y, y1 = y0 + S;
+      for (let i = gp; i < ngem; i++) {
+        const o = gems[i];
+        if (o.x - GR > x1) break;
+        if (gst[i]) continue;
+        if (circleBoxSep(o.x, o.y, GR, x0, y0, x1, y1) <= 0) {
+          gst[i] = 1; o.got = true;
+          s.gems++; s.combo++;
+          if (s.combo > s.maxCombo) s.maxCombo = s.combo;
+          const mult = Math.min(4, 1 + Math.floor(s.combo / 16)), points = 10 * mult;
+          s.score += points;
+          emit('gem', { gi: i, ox: o.x, oy: o.y, combo: s.combo, mult, points, obj: o });
+        } else if (o.x + GR < x0) {
+          gst[i] = 2; o.missed = true;
+          const lost = s.combo;
+          s.combo = 0;
+          if (lost > 0) emit('gemmiss', { gi: i, ox: o.x, oy: o.y, comboLost: lost, obj: o });
+        }
+      }
+      while (gp < ngem && gst[gp]) gp++;
+    }
     let lo = 0, hi = -1, gi = 0; // 검사 창 [lo, hi] (정렬 인덱스), 구멍 포인터
 
     function emit(type, extra) {
@@ -290,12 +321,13 @@
             }
           } else if (k === K_COIN) {
             if (o.ci < 3 && !s.coins[o.ci] && circleBoxSep(o.x, o.y, PHYS.coinR, x, y, x + S, y + S) <= 0) {
-              s.coins[o.ci] = true;
+              s.coins[o.ci] = true; s.score += 250;
               emit('coin', { i: o.ci, ox: o.x, oy: o.y, obj: o });
             }
           }
         }
         if (s.y < PHYS.fallDeath) { die('fall', null); return; }
+        if (ngem) updateGems();
         if (x >= length) { s.done = true; emit('complete'); }
       }
       s.progress = length === Infinity ? 0 : Math.min(1, Math.max(0, s.x / length));
@@ -342,6 +374,8 @@
       get bufferT() { return buf; },
       get lastOrb() { return lastOrb; },
       coinCount: P.coinCount,
+      gemCount: P.gems.length,
+      gems: P.gems,                       // x 정렬된 젬 복사본 (o.gi, o.got, o.missed)
     };
     // 시작 위치가 구멍/블록 위인지 정리: startY 미지정이면 바닥(0)
     s.progress = length === Infinity ? 0 : Math.min(1, Math.max(0, s.x / length));

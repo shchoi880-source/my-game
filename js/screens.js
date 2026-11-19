@@ -2,7 +2,11 @@
 // 장면: title / select / play(+일시정지) / complete — docs/SPEC.md §8
 (() => {
   const G = window.G;
-  const W = G.W || 960, H = G.H || 540, TAU = Math.PI * 2;
+  let W = G.W || 960, H = G.H || 540;
+  const TAU = Math.PI * 2;
+  // 일시정지 버튼: 오른쪽 위에 붙임(화면 폭이 바뀌면 x 갱신). onResize보다 먼저 선언(TDZ 방지)
+  const PAUSE_BTN = { x: W - 66, y: 8, w: 56, h: 50 };
+  if (G.onResize) G.onResize(() => { W = G.W; H = G.H; PAUSE_BTN.x = W - 66; });
   G.scenes = G.scenes || {};
   const RN = () => G.render;
   const FX = () => G.fx;
@@ -16,6 +20,7 @@
   const lvSave = lv => (G.save && lv ? G.save.level(lv.id) : { best: 0, done: false, attempts: 0, coins: [false, false, false], bestTime: null, practiceBest: 0 });
   const persist = () => { try { G.save && G.save.persist(); } catch (e) { /* 무시 */ } };
   const unlocked = i => i === 0 || (levels()[i - 1] && lvSave(levels()[i - 1]).done);
+  const fmtNum = n => String(Math.max(0, Math.round(n || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const fmtTime = s => { if (s == null || !isFinite(s)) return '--'; const m = Math.floor(s / 60), r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + r.toFixed(2); };
 
   // ===== 오디오 안전 래퍼 =====
@@ -156,10 +161,13 @@
 
   // ===== 공통 프레임 =====
   let clock = 0, lastDt = 0.016;
+  // 반환값 true = 이번 프레임에 장면이 바뀜(호출한 장면은 나머지 update를 건너뛸 것)
   function common(dt) {
     clock += dt; lastDt = dt;
     if (FX()) FX().update(dt);
+    const before = tr.phase;
     trUpdate(dt);
+    return before === 1 && tr.phase === 2;
   }
   function post(ctx) {
     if (FX()) { FX().draw(ctx, 1); FX().drawOverlay(ctx); }
@@ -296,7 +304,7 @@
       ctx.font = '900 ' + size + 'px ' + G.FONT;
       const total = ctx.measureText(word).width;
       let x = W / 2 - total / 2;
-      const ly = 150;
+      const ly = 150 + (H - 540) * 0.45;
       for (let i = 0; i < word.length; i++) {
         const ch = word[i], cw = ctx.measureText(ch).width;
         const k = eob((t - 0.08 * i) / 0.5);
@@ -322,12 +330,12 @@
       if (t > 1.1) {
         const pa = 0.55 + 0.45 * Math.sin(t * 4.2);
         const sc = 1 + bt.pulse * 0.06;
-        ctx.save(); ctx.translate(W / 2, 352); ctx.scale(sc, sc); ctx.globalAlpha = pa;
+        ctx.save(); ctx.translate(W / 2, H - 188); ctx.scale(sc, sc); ctx.globalAlpha = pa;
         R.rr(ctx, -200, -28, 400, 56, 28); ctx.fillStyle = 'rgba(5,6,20,0.65)'; ctx.fill();
         R.neonStroke(ctx, '#29f0ff', 2);
         R.glowText(ctx, '화면을 터치해서 시작', 0, 1, 26, '#ffffff', { glow: 0.6 });
         ctx.restore();
-        R.txt(ctx, 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, 400, 14, 'rgba(255,255,255,0.65)', { weight: 600 });
+        R.txt(ctx, 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, H - 140, 14, 'rgba(255,255,255,0.75)', { weight: 600, stroke: 4 });
       }
       const sd = G.save && G.save.data;
       if (sd && sd.totalAttempts) R.txt(ctx, '총 시도 ' + sd.totalAttempts + '회', W - 20, H - 18, 14, 'rgba(255,255,255,0.5)', { align: 'right', weight: 600 });
@@ -422,7 +430,11 @@
     if (best > 0) { R.rr(ctx, 18, 222, (w - 36) * best / 100, 8, 4); ctx.fillStyle = sel.practice ? '#5dff7a' : th.accent; ctx.fill(); }
     R.txt(ctx, (sel.practice ? '연습 최고' : '최고 기록') + ' · 시도 ' + (sv.attempts || 0), w / 2, 244, 12, 'rgba(255,255,255,0.65)', { weight: 700, maxW: w - 16 });
     // 코인
-    for (let c = 0; c < 3; c++) coinSlot(ctx, w / 2 - 30 + c * 30, 274, 10, sv.coins && sv.coins[c]);
+    for (let c = 0; c < 3; c++) coinSlot(ctx, w / 2 - 30 + c * 30, 268, 10, sv.coins && sv.coins[c]);
+    // 최고 점수 / 최대 콤보
+    const bs = sv.bestScore || 0;
+    R.txt(ctx, bs ? 'SCORE ' + fmtNum(bs) : 'SCORE -', w / 2, 292, 13, bs ? '#ffe14d' : 'rgba(255,255,255,0.35)', { weight: 900, maxW: w - 16 });
+    if (sv.maxCombo) R.txt(ctx, 'MAX COMBO ' + sv.maxCombo, w / 2, 306, 10, 'rgba(255,255,255,0.55)', { weight: 800, maxW: w - 16 });
     if (lock) {
       R.rr(ctx, 0, 0, w, h, 18); ctx.fillStyle = 'rgba(3,4,12,0.88)'; ctx.fill();
       lockIcon(ctx, w / 2, h / 2 - 20, 1.6, '#9aa0c0');
@@ -475,8 +487,8 @@
       if (!L.length) {
         R.glowText(ctx, '레벨 데이터를 불러오지 못했어요', W / 2, H / 2, 24, '#ff3df2');
       } else {
-        const n = L.length, cw = 172, gap = 12, total = n * cw + (n - 1) * gap;
-        const sx = W / 2 - total / 2, cy = 100, ch = 300;
+        const n = L.length, gap = 12, cw = clamp(Math.floor((W - 60 - (n - 1) * gap) / n), 150, 200), total = n * cw + (n - 1) * gap;
+        const ch = 316, sx = W / 2 - total / 2, cy = 92 + Math.max(0, (H - 540) / 2);
         for (let i = 0; i < n; i++) {
           const k = eob((t - 0.1 - i * 0.07) / 0.5);
           if (k <= 0) continue;
@@ -486,14 +498,14 @@
           drawCard(ctx, i, x, y, cw, ch, a);
           ctx.restore();
         }
-        if (sel.practice) R.txt(ctx, '연습 모드: 3초마다 자동 체크포인트 · 기록은 연습 최고에만 저장', W / 2, 424, 14, '#5dff7a', { weight: 700 });
+        if (sel.practice) R.txt(ctx, '연습 모드: 3초마다 자동 체크포인트 · 기록은 연습 최고에만 저장', W / 2, cy + ch + 14, 14, '#5dff7a', { weight: 700 });
       }
       // 하단 합계
       const sd = G.save && G.save.data;
       if (sd && L.length) {
         let clr = 0, coins = 0;
         for (const lv of L) { const s = lvSave(lv); if (s.done) clr++; coins += (s.coins || []).filter(Boolean).length; }
-        const fy = 470, ft = eoc((t - 0.5) / 0.4);
+        const fy = H - 70, ft = eoc((t - 0.5) / 0.4);
         ctx.globalAlpha = ft;
         R.rr(ctx, W / 2 - 260, fy - 22, 520, 44, 22); ctx.fillStyle = 'rgba(8,10,30,0.75)'; ctx.fill();
         R.txt(ctx, '클리어 ' + clr + '/' + L.length + '     코인 ' + coins + '/' + (L.length * 3) + '     총 시도 ' + (sd.totalAttempts || 0), W / 2, fy, 16, '#ffffff', { weight: 700 });
@@ -539,13 +551,33 @@
   // ===== PLAY =====
   // ======================================================================
   const RESTART = 0.4, CP_EVERY = 3;
-  const PAUSE_BTN = { x: W - 66, y: 8, w: 56, h: 50 };
   const pl = {
     li: 0, level: null, practice: false, run: null, cam: null, err: null,
     attempt: 0, sessionAttempts: 0, deadT: -1, death: null, paused: false, pauseT: 0,
     checkpoints: [], cpTimer: 0, completeT: -1, result: null, layer: -1, pctShown: 0,
     jumps: 0, fwT: 0, coinPop: [0, 0, 0], runStart: 0,
+    // 점수/콤보 HUD
+    scoreShown: 0, scorePop: 0, mult: 1, comboPop: 0, comboShake: 0, comboShown: 0, lostCombo: 0,
   };
+  // 젬/점수 상태 읽기(엔진 필드가 없을 때도 안전하게)
+  const scoreOf = st => (st && +st.score) || 0;
+  const comboOf = st => (st && +st.combo) || 0;
+  const maxComboOf = st => (st && +st.maxCombo) || 0;
+  function gemsGot(st) {
+    const g = st && st.gems;
+    if (typeof g === 'number') return g;
+    if (g && typeof g.length === 'number') { let n = 0; for (let i = 0; i < g.length; i++) if (g[i]) n++; return n; }
+    return 0;
+  }
+  function gemTotal(run) {
+    if (!run) return 0;
+    if (typeof run.gemCount === 'number') return run.gemCount;
+    let n = 0; const o = run.objects || [];
+    for (let i = 0; i < o.length; i++) if (o[i] && o[i].t === 'gem') n++;
+    return n;
+  }
+  // 기록 객체에 새 필드 보충
+  function ensureRec(sv) { if (sv.bestScore == null) sv.bestScore = 0; if (sv.maxCombo == null) sv.maxCombo = 0; return sv; }
   const track = () => (pl.level && (pl.level.track || pl.level.id)) || 'lv1';
   const center = st => { const s = (G.PHYS && G.PHYS.size) || 34; return { x: st.x + s / 2, y: st.y + s / 2 }; };
 
@@ -560,6 +592,7 @@
     R.updateCam(pl.cam, pl.run, 0, true);
     pl.deadT = -1; pl.completeT = -1; pl.cpTimer = 0; pl.layer = -1; pl.fwT = 0;
     pl.runStart = pl.run.state.x;
+    pl.scoreShown = scoreOf(pl.run.state); pl.scorePop = 0; pl.mult = 1; pl.comboPop = 0; pl.comboShake = 0; pl.comboShown = 0;
     if (!pl.practice) {
       const sv = lvSave(lv);
       sv.attempts = (sv.attempts || 0) + 1;
@@ -604,14 +637,19 @@
     A.sfx('die');
     A.stop();
     G.vibrate && G.vibrate([35, 25, 45]);
-    const sv = lvSave(pl.level);
+    const sv = ensureRec(lvSave(pl.level));
     let nb = false;
-    if (!pl.practice) { if (pct > (sv.best || 0)) { sv.best = pct; nb = true; } }
+    const score = scoreOf(st);
+    if (!pl.practice) {
+      if (pct > (sv.best || 0)) { sv.best = pct; nb = true; }
+      if (score > sv.bestScore) sv.bestScore = score;
+      if (maxComboOf(st) > sv.maxCombo) sv.maxCombo = maxComboOf(st);
+    }
     else if (pct > (sv.practiceBest || 0)) { sv.practiceBest = pct; nb = true; }
     if (G.save && G.save.data) { G.save.data.totalJumps = (G.save.data.totalJumps || 0) + pl.jumps; }
     pl.jumps = 0;
     persist();
-    pl.death = { pct, nb, t: 0 };
+    pl.death = { pct, nb, t: 0, score };
     if (nb && pct > 0) setTimeout(() => A.sfx('newbest'), 120);
   }
   function onComplete() {
@@ -619,11 +657,14 @@
     pl.completeT = 0;
     const st = pl.run.state;
     const f = FX();
-    if (f) { f.slowmo(0.35, 1.1); f.flash('#ffffff', 0.55); f.punch(0.06); f.shake(0.3); for (let i = 0; i < 3; i++) f.firework(200 + i * 280, 140 + (i % 2) * 60); }
+    if (f) { f.slowmo(0.35, 1.1); f.flash('#ffffff', 0.55); f.punch(0.06); f.shake(0.3); for (let i = 0; i < 3; i++) f.firework(W * (0.2 + i * 0.3), 140 + (i % 2) * 60); }
     A.sfx('complete');
     A.layer(3);
     G.vibrate && G.vibrate([40, 30, 90]);
-    const sv = lvSave(pl.level);
+    const sv = ensureRec(lvSave(pl.level));
+    const score = scoreOf(st), maxCombo = maxComboOf(st);
+    const prevBestScore = sv.bestScore;
+    const newBestScore = !pl.practice && score > 0 && score > prevBestScore;
     const time = st.t || (st.x / (pl.level.speed || 400));
     const firstClear = !pl.practice && !sv.done;
     const newCoins = [false, false, false];
@@ -632,6 +673,8 @@
       if (!sv.coins) sv.coins = [false, false, false];
       for (let i = 0; i < 3; i++) if (st.coins && st.coins[i] && !sv.coins[i]) { sv.coins[i] = true; newCoins[i] = true; }
       if (sv.bestTime == null || time < sv.bestTime) sv.bestTime = time;
+      if (score > sv.bestScore) sv.bestScore = score;
+      if (maxCombo > sv.maxCombo) sv.maxCombo = maxCombo;
     } else sv.practiceBest = 100;
     if (G.save && G.save.data) G.save.data.totalJumps = (G.save.data.totalJumps || 0) + pl.jumps;
     pl.jumps = 0;
@@ -640,6 +683,8 @@
       level: pl.li, attempts: pl.attempt, time, practice: pl.practice, firstClear,
       coins: (st.coins || [false, false, false]).slice(), newCoins, savedCoins: (sv.coins || []).slice(),
       bestTime: sv.bestTime,
+      score, maxCombo, newBestScore, bestScore: sv.bestScore,
+      gems: gemsGot(st), gemTotal: gemTotal(pl.run),
     };
   }
   function processEvents() {
@@ -662,6 +707,33 @@
           break;
         }
         case 'nearmiss': f && f.nearMiss(ex, ey + S / 2); A.sfx('nearmiss', { combo: f ? Math.max(0, f.combo - 1) : 0 }); G.vibrate && G.vibrate(8); break;
+        case 'gem': {
+          const combo = e.combo != null ? e.combo : comboOf(st);
+          const mult = e.mult || 1, pts = e.points != null ? e.points : 10 * mult;
+          const gx = e.ox != null ? e.ox : ex, gy = e.oy != null ? e.oy : ey + S / 2;
+          if (e.obj) { try { e.obj._taken = true; } catch (er) { /* 무시 */ } }
+          R.gemTaken && R.gemTaken(e.gi);
+          const cols = R.GEM_COLS || ['#29f0ff'];
+          A.sfx('gem', { combo });
+          if (f) f.gemPickup(gx, gy, cols[(combo + (e.gi || 0)) % cols.length], mult > 1 ? '+' + pts + ' ×' + mult : '+' + pts);
+          if (mult > pl.mult) pl.comboPop = 1.4; else pl.comboPop = Math.max(pl.comboPop, 0.6);
+          pl.mult = mult; pl.scorePop = 1;
+          if (combo > 0 && combo % 50 === 0) {
+            A.sfx('milestone', { combo });
+            if (f) f.milestone(gx, gy, combo, combo % 100 === 0 ? '#ff3df2' : '#ffe14d');
+            G.vibrate && G.vibrate([15, 30, 15]);
+          }
+          break;
+        }
+        case 'gemmiss': {
+          if (e.comboLost) {
+            A.sfx('gemmiss');
+            pl.lostCombo = typeof e.comboLost === 'number' ? e.comboLost : pl.comboShown;
+            if (f) f.comboBreak(st.x + S / 2, st.y + S, pl.lostCombo);
+            pl.comboShake = 1; pl.mult = 1;
+          }
+          break;
+        }
         case 'die': onDeath(); break;
         case 'complete': onComplete(); break;
       }
@@ -729,11 +801,56 @@
       if (!got && sv.coins && sv.coins[i]) { ctx.globalAlpha = 0.35; coinSlot(ctx, 26 + i * 24, 68, 8, true); ctx.globalAlpha = 1; }
       else coinSlot(ctx, 26 + i * 24, 68, 8, got, pl.coinPop[i]);
     }
+    drawScoreCombo(ctx, st);
     // 일시정지 버튼
     const b = PAUSE_BTN;
     R.rr(ctx, b.x + 6, b.y + 4, b.w - 12, b.h - 8, 12); ctx.fillStyle = 'rgba(4,5,16,0.55)'; ctx.fill();
     R.neonStroke(ctx, '#ffffff', 1.5);
     pauseIcon(ctx, b.x + b.w / 2, b.y + b.h / 2, '#ffffff');
+  }
+  // 좌상단(ATTEMPT 아래): 점수 카운트업 + 콤보 "x23" + 배수 배지
+  function drawScoreCombo(ctx, st) {
+    const R = RN(), dt = lastDt;
+    const score = scoreOf(st), combo = comboOf(st);
+    const diff = score - pl.scoreShown;
+    if (diff > 0) pl.scoreShown = Math.min(score, pl.scoreShown + Math.max(1, diff * Math.min(1, dt * 12)));
+    else pl.scoreShown = score;
+    pl.scorePop = Math.max(0, pl.scorePop - dt * 5);
+    pl.comboPop = Math.max(0, pl.comboPop - dt * 4);
+    pl.comboShake = Math.max(0, pl.comboShake - dt * 2.2);
+    if (combo > 0) pl.comboShown = combo;
+    // 점수
+    const sy = 98, ss = 1 + 0.12 * pl.scorePop;
+    ctx.save(); ctx.translate(18, sy); ctx.scale(ss, ss);
+    R.txt(ctx, fmtNum(pl.scoreShown), 0, 0, 24, '#ffffff', { align: 'left', weight: 900, stroke: 4 });
+    ctx.restore();
+    R.txt(ctx, 'SCORE', 20, sy + 18, 9, 'rgba(255,255,255,0.55)', { align: 'left', weight: 800, stroke: 2 });
+    // 콤보: 진행 중이면 표시, 끊기면 흔들리며 떨어져 사라짐
+    let a = combo > 0 ? 1 : pl.comboShake;
+    if (a <= 0.01 || (!pl.comboShown && combo <= 0)) return;
+    const cy = 136;
+    const sh = pl.comboShake;
+    const dx = sh > 0 ? Math.sin(sh * 70) * 6 * sh : 0, dy = combo > 0 ? 0 : (1 - sh) * 24;
+    const c = combo > 0 ? combo : (pl.lostCombo || pl.comboShown);
+    const col = combo > 0 ? (pl.mult >= 4 ? '#ff3df2' : pl.mult >= 3 ? '#ffe14d' : pl.mult >= 2 ? '#29f0ff' : '#ffffff') : '#ff3d6a';
+    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1); ctx.translate(18 + dx, cy + dy);
+    const ps = 1 + 0.25 * pl.comboPop;
+    ctx.save(); ctx.scale(ps, ps);
+    R.txt(ctx, String(c), 0, 0, 22, col, { align: 'left', weight: 900, stroke: 4 });
+    ctx.restore();
+    const tw = (G.textW ? G.textW(String(c), 22) : 40) * ps;
+    if (combo > 0 && pl.mult > 1) {
+      const bx = tw + 10, bs = 1 + 0.35 * pl.comboPop;
+      ctx.save(); ctx.translate(bx + 18, 0); ctx.scale(bs, bs);
+      R.rr(ctx, -18, -11, 36, 22, 11); ctx.fillStyle = col; ctx.fill();
+      R.txt(ctx, '×' + pl.mult, 0, 1, 13, '#05060f', { weight: 900 });
+      ctx.restore();
+    } else if (combo <= 0) {
+      R.txt(ctx, 'BREAK', tw + 10, 1, 12, '#ff3d6a', { align: 'left', weight: 900, stroke: 3 });
+    } else {
+      R.txt(ctx, 'COMBO', tw + 8, 2, 10, 'rgba(255,255,255,0.6)', { align: 'left', weight: 800, stroke: 2 });
+    }
+    ctx.restore();
   }
   function drawDeathInfo(ctx) {
     const d = pl.death;
@@ -745,9 +862,10 @@
     ctx.save(); ctx.globalAlpha = clamp(a, 0, 1);
     ctx.translate(W / 2, H / 2 - 40); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
     R.glowText(ctx, d.pct + '%', 0, 0, 104, d.nb ? '#ffe14d' : '#ffffff', { glow: 0.9 });
+    if (d.score > 0) R.txt(ctx, 'SCORE ' + fmtNum(d.score), 0, 60, 18, 'rgba(255,255,255,0.85)', { weight: 800, stroke: 4 });
     if (d.nb && d.pct > 0) {
       const k2 = eob((d.t - 0.08) / 0.25);
-      ctx.save(); ctx.translate(0, 74); ctx.rotate(-0.05 + Math.sin(d.t * 18) * 0.03); ctx.scale(k2, k2);
+      ctx.save(); ctx.translate(0, d.score > 0 ? 100 : 74); ctx.rotate(-0.05 + Math.sin(d.t * 18) * 0.03); ctx.scale(k2, k2);
       const hue = ['#ff3df2', '#29f0ff', '#ffe14d', '#3dffb0'][Math.floor(d.t * 14) % 4];
       R.glowText(ctx, pl.practice ? '연습 최고 기록!' : 'NEW BEST!', 0, 0, 44, hue, { glow: 1 });
       ctx.restore();
@@ -788,7 +906,7 @@
       startAttempt();
     },
     update(dt) {
-      common(dt);
+      if (common(dt)) return;
       if (pl.err || !pl.run) return;
       if (G.portrait && !pl.paused && pl.completeT < 0 && !pl.run.state.dead) pause();
       if (pl.paused) return;
@@ -825,7 +943,7 @@
       if (pl.completeT >= 0) {
         pl.completeT += dt;
         pl.fwT -= dt;
-        if (pl.fwT <= 0 && f) { pl.fwT = 0.18; f.firework(G.rand ? G.rand(120, W - 120) : W / 2, G.rand ? G.rand(70, 260) : 150); }
+        if (pl.fwT <= 0 && f) { pl.fwT = 0.18; f.firework(G.rand ? G.rand(120, W - 120) : W / 2, G.rand ? G.rand(70, H * 0.48) : 150); }
         if (pl.completeT >= 2.0 && !busy()) nav('complete', pl.result);
       }
     },
@@ -909,6 +1027,11 @@
     R.glowText(g, String(r.attempts), 70, 420, 76, '#ffffff', { align: 'left', glow: 0.6 });
     R.txt(g, '시간', 340, 360, 24, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700 });
     R.glowText(g, fmtTime(r.time), 340, 420, 54, '#ffffff', { align: 'left', glow: 0.5 });
+    if (r.score) {
+      R.txt(g, '점수', 620, 360, 24, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700 });
+      R.glowText(g, fmtNum(r.score), 620, 420, 54, '#ffe14d', { align: 'left', glow: 0.6 });
+    }
+    if (r.maxCombo) R.txt(g, '최대 콤보 ' + r.maxCombo + (r.gemTotal ? '   젬 ' + (r.gems || 0) + '/' + r.gemTotal : ''), 340, 521, 24, 'rgba(255,255,255,0.85)', { align: 'left', weight: 800 });
     R.txt(g, '코인', 70, 520, 24, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700 });
     for (let i = 0; i < 3; i++) {
       g.save(); g.translate(150 + i * 50, 520);
@@ -936,7 +1059,7 @@
     if (!cp.card) prepareCard();
     const name = 'neon-dash-' + ((levels()[r.level] || {}).id || 'lv') + '.png';
     const lvName = (levels()[r.level] || {}).name || '';
-    const text = 'NEON DASH 「' + lvName + '」 ' + r.attempts + '번 만에 클리어!';
+    const text = 'NEON DASH 「' + lvName + '」 ' + r.attempts + '번 만에 클리어!' + (r.score ? ' 점수 ' + fmtNum(r.score) : '');
     const doDownload = blob => {
       try {
         const a = document.createElement('a');
@@ -974,7 +1097,7 @@
       common(dt); cp.t += dt; demoUpdate(dt * 0.5);
       cp.fw -= dt;
       const f = FX();
-      if (cp.fw <= 0 && f) { cp.fw = cp.t < 2.5 ? 0.28 : 1.1; f.firework(G.rand ? G.rand(80, W - 80) : W / 2, G.rand ? G.rand(60, 240) : 140); }
+      if (cp.fw <= 0 && f) { cp.fw = cp.t < 2.5 ? 0.28 : 1.1; f.firework(G.rand ? G.rand(80, W - 80) : W / 2, G.rand ? G.rand(60, H * 0.45) : 140); }
       if (cp.musicT > 0) { cp.musicT -= dt; if (cp.musicT <= 0) { A.stop(); menuMusic(); } }
     },
     draw(ctx) {
@@ -984,42 +1107,61 @@
       demoDraw(ctx);
       ctx.fillStyle = 'rgba(4,5,16,0.62)'; ctx.fillRect(0, 0, W, H);
       vignette(ctx, 0.55);
+      const oy = Math.max(0, (H - 540) / 2); // 화면이 높으면 가운데로
       // 제목
       const k = eob(t / 0.45);
-      ctx.save(); ctx.translate(W / 2, 70); ctx.scale(k, k); ctx.rotate(-0.03 + Math.sin(t * 2) * 0.01);
-      R.glowText(ctx, r.practice ? '연습 클리어!' : '레벨 클리어!', 0, 0, 60, '#ffe14d', { glow: 1 });
+      ctx.save(); ctx.translate(W / 2, 56 + oy); ctx.scale(k, k); ctx.rotate(-0.03 + Math.sin(t * 2) * 0.01);
+      R.glowText(ctx, r.practice ? '연습 클리어!' : '레벨 클리어!', 0, 0, 56, '#ffe14d', { glow: 1 });
       ctx.restore();
       ctx.globalAlpha = eoc((t - 0.2) / 0.3);
-      R.txt(ctx, 'LEVEL ' + (r.level + 1) + ' · ' + (lv.name || ''), W / 2, 122, 20, '#ffffff', { weight: 800, stroke: 4 });
-      if (r.firstClear) R.txt(ctx, '첫 클리어!' + (L[r.level + 1] ? '  다음 레벨 해금!' : '  모든 레벨 정복!'), W / 2, 150, 15, '#3dffb0', { weight: 800 });
+      R.txt(ctx, 'LEVEL ' + (r.level + 1) + ' · ' + (lv.name || ''), W / 2, 102 + oy, 19, '#ffffff', { weight: 800, stroke: 4 });
+      if (r.firstClear) R.txt(ctx, '첫 클리어!' + (L[r.level + 1] ? '  다음 레벨 해금!' : '  모든 레벨 정복!'), W / 2, 126 + oy, 14, '#3dffb0', { weight: 800 });
       ctx.globalAlpha = 1;
-      // 스탯 타일
-      const tiles = 3, tw = 220, th = 150, gap = 24, sx = W / 2 - (tiles * tw + (tiles - 1) * gap) / 2, ty = 178;
-      for (let i = 0; i < tiles; i++) {
-        const kk = eob((t - 0.35 - i * 0.12) / 0.4);
+      // 스탯 타일 2줄 × 3
+      const tw = 200, th = 100, gap = 16, sx = W / 2 - (3 * tw + 2 * gap) / 2, ty0 = 144 + oy;
+      const COLS = ['#29f0ff', '#ff3df2', '#ffcf3d', '#ffe14d', '#3dffb0', '#9d7bff'];
+      const LABELS = ['시도 횟수', '시간', '코인', '점수', '최대 콤보', '젬'];
+      for (let i = 0; i < 6; i++) {
+        const kk = eob((t - 0.3 - i * 0.09) / 0.4);
         if (kk <= 0) continue;
-        const x = sx + i * (tw + gap);
+        const x = sx + (i % 3) * (tw + gap), ty = ty0 + Math.floor(i / 3) * (th + 12);
+        const cnt = eoc((t - 0.4 - i * 0.09) / 0.8);
         ctx.save(); ctx.translate(x + tw / 2, ty + th / 2); ctx.scale(kk, kk); ctx.translate(-tw / 2, -th / 2);
-        R.rr(ctx, 0, 0, tw, th, 18); ctx.fillStyle = 'rgba(10,12,34,0.9)'; ctx.fill();
-        R.neonStroke(ctx, ['#29f0ff', '#ff3df2', '#ffcf3d'][i], 2);
-        R.txt(ctx, ['시도 횟수', '시간', '코인'][i], tw / 2, 28, 16, 'rgba(255,255,255,0.7)', { weight: 700 });
+        R.rr(ctx, 0, 0, tw, th, 16); ctx.fillStyle = 'rgba(10,12,34,0.9)'; ctx.fill();
+        R.neonStroke(ctx, COLS[i], 2);
+        R.txt(ctx, LABELS[i], tw / 2, 20, 14, 'rgba(255,255,255,0.7)', { weight: 700 });
         if (i === 0) {
-          const n = Math.round(r.attempts * eoc((t - 0.45) / 0.8));
-          R.glowText(ctx, String(n), tw / 2, 86, 60, '#ffffff', { glow: 0.6 });
+          R.glowText(ctx, String(Math.round(r.attempts * cnt)), tw / 2, 60, 44, '#ffffff', { glow: 0.6 });
         } else if (i === 1) {
-          R.glowText(ctx, fmtTime(r.time * eoc((t - 0.55) / 0.8)), tw / 2, 82, 38, '#ffffff', { glow: 0.5 });
-          if (!r.practice && r.bestTime != null) R.txt(ctx, '최고 ' + fmtTime(r.bestTime), tw / 2, 124, 13, 'rgba(255,255,255,0.6)', { weight: 700 });
-        } else {
+          R.glowText(ctx, fmtTime(r.time * cnt), tw / 2, 56, 30, '#ffffff', { glow: 0.5 });
+          if (!r.practice && r.bestTime != null) R.txt(ctx, '최고 ' + fmtTime(r.bestTime), tw / 2, 86, 12, 'rgba(255,255,255,0.6)', { weight: 700 });
+        } else if (i === 2) {
           for (let c = 0; c < 3; c++) {
             const kc = eob((t - 0.8 - c * 0.18) / 0.3);
             const got = r.coins && r.coins[c], had = !r.practice && r.savedCoins && r.savedCoins[c];
-            ctx.save(); ctx.translate(tw / 2 - 56 + c * 56, 84);
+            ctx.save(); ctx.translate(tw / 2 - 48 + c * 48, 58);
             if (got) { ctx.scale(Math.max(0.01, kc), Math.max(0.01, kc)); }
             if (!got && had) ctx.globalAlpha = 0.4;
-            coinSlot(ctx, 0, 0, 20, got || had);
+            coinSlot(ctx, 0, 0, 16, got || had);
             ctx.restore();
-            if (got && r.newCoins && r.newCoins[c] && kc > 0.9) R.txt(ctx, 'NEW', tw / 2 - 56 + c * 56, 118, 11, '#ffe14d', { weight: 900 });
+            if (got && r.newCoins && r.newCoins[c] && kc > 0.9) R.txt(ctx, 'NEW', tw / 2 - 48 + c * 48, 86, 10, '#ffe14d', { weight: 900 });
           }
+        } else if (i === 3) {
+          R.glowText(ctx, fmtNum((r.score || 0) * cnt), tw / 2, 58, 32, '#ffe14d', { glow: 0.6 });
+          if (r.newBestScore && cnt > 0.95) {
+            const bp = 1 + 0.08 * Math.sin(t * 8);
+            ctx.save(); ctx.translate(tw / 2, 86); ctx.rotate(-0.04); ctx.scale(bp, bp);
+            R.rr(ctx, -44, -10, 88, 20, 10); ctx.fillStyle = '#ff3df2'; ctx.fill();
+            R.txt(ctx, 'NEW BEST', 0, 1, 11, '#ffffff', { weight: 900 });
+            ctx.restore();
+          } else if (!r.practice && r.bestScore) R.txt(ctx, '최고 ' + fmtNum(r.bestScore), tw / 2, 86, 12, 'rgba(255,255,255,0.6)', { weight: 700 });
+        } else if (i === 4) {
+          R.glowText(ctx, '' + Math.round((r.maxCombo || 0) * cnt), tw / 2, 60, 36, '#3dffb0', { glow: 0.6 });
+        } else {
+          const tot = r.gemTotal || 0, got = Math.round((r.gems || 0) * cnt);
+          R.glowText(ctx, tot ? got + '/' + tot : '-', tw / 2, 58, 32, '#ffffff', { glow: 0.5 });
+          if (tot && r.gems >= tot && cnt > 0.95) R.txt(ctx, 'PERFECT!', tw / 2, 86, 12, '#ffe14d', { weight: 900 });
+          else if (tot) R.txt(ctx, Math.floor(100 * (r.gems || 0) / tot) + '%', tw / 2, 86, 12, 'rgba(255,255,255,0.6)', { weight: 700 });
         }
         ctx.restore();
       }
@@ -1027,15 +1169,15 @@
       const bk = eoc((t - 0.9) / 0.4);
       if (bk > 0) {
         ctx.save(); ctx.globalAlpha = bk; ctx.translate(0, (1 - bk) * 40);
-        const by = 360;
+        const by = ty0 + 2 * (th + 12) + 6;
         const hasNext = !!L[r.level + 1] && unlocked(r.level + 1);
         const bw = 200, bg2 = 16;
         const n = hasNext ? 3 : 2, bx0 = W / 2 - (n * bw + (n - 1) * bg2) / 2;
         let bi = 0;
-        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, 58, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
-        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, 58, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
-        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, 58, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level }); }, { color: '#ff3df2', size: 22 });
-        button(ctx, 'c_share', W / 2 - 130, by + 76, 260, 50, '기록 카드 공유 / 저장', () => { A.sfx('click'); shareCard(); }, { color: '#ffcf3d', size: 18 });
+        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, 54, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
+        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, 54, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
+        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, 54, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level }); }, { color: '#ff3df2', size: 22 });
+        button(ctx, 'c_share', W / 2 - 130, by + 64, 260, 44, '기록 카드 공유 / 저장', () => { A.sfx('click'); shareCard(); }, { color: '#ffcf3d', size: 18 });
         ctx.restore();
       }
       post(ctx);

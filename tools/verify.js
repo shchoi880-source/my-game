@@ -25,6 +25,8 @@ load('js/core.js', true);  // 유틸만 쓰임 (DOM 없으면 캔버스 생략)
 load('js/engine.js');
 const lvArg = process.argv.indexOf('--levels');
 const hasLevels = load(lvArg >= 0 ? path.resolve(process.argv[lvArg + 1]) : 'js/levels.js', true);
+// 리듬 젬 (tools/gems.js 생성물). 젬은 물리에 영향 없음. tools/gems.js가 부를 때는 생략.
+const withGems = hasLevels && lvArg < 0 && !global.__NO_GEMS && !process.argv.includes('--no-gems') && load('js/gems.js', true);
 const { PHYS, Engine } = G;
 const TICK_STEPS = 4; // 1/60초 = 4 스텝
 
@@ -325,7 +327,7 @@ function staticCheck(level) {
   const objs = level.objects || [];
   const coins = objs.filter(o => o.t === 'coin').length;
   if (coins !== 3) warn.push(`코인 ${coins}개 (3개여야 함)`);
-  const types = new Set(['block', 'spike', 'saw', 'pad', 'orb', 'coin', 'gap']);
+  const types = new Set(['block', 'spike', 'saw', 'pad', 'orb', 'coin', 'gap', 'gem']);
   objs.forEach((o, i) => {
     if (!types.has(o.t)) warn.push(`#${i} 알 수 없는 t='${o.t}'`);
     for (const k of ['x', 'y', 'w', 'h', 'r']) if (k in o && !Number.isFinite(o[k])) warn.push(`#${i} ${o.t}.${k}=${o[k]}`);
@@ -358,7 +360,8 @@ function verifyLevel(level, beam, showTaps) {
   const cnt = ty => ev.filter(e => e.type === ty).length;
   const tol = tolerance(level, taps);
   const searchSec = (Date.now() - t0) / 1000;
-  console.log(`  풀이 가능: YES  완주 시간 ${fmt(fin.t, 2)}s, 탭 ${taps.length}회 (점프 ${cnt('jump')}, 2단 ${cnt('djump')}, 오브 ${cnt('orb')}, 점프대 ${cnt('pad')}, 코인 ${cnt('coin')}, 니어미스 ${cnt('nearmiss')})  [검증 ${searchSec.toFixed(1)}s (탐색 ${tSearch.toFixed(1)}s), 최대 상태수 ${r.peak}]`);
+  const fs_ = fin.run.state, gemTxt = fin.run.gemCount ? `, 젬 ${fs_.gems}/${fin.run.gemCount} 최대콤보 ${fs_.maxCombo} 점수 ${fs_.score}` : '';
+  console.log(`  풀이 가능: YES  완주 시간 ${fmt(fin.t, 2)}s, 탭 ${taps.length}회 (점프 ${cnt('jump')}, 2단 ${cnt('djump')}, 오브 ${cnt('orb')}, 점프대 ${cnt('pad')}, 코인 ${cnt('coin')}, 니어미스 ${cnt('nearmiss')}${gemTxt})  [검증 ${searchSec.toFixed(1)}s (탐색 ${tSearch.toFixed(1)}s), 최대 상태수 ${r.peak}]`);
   if (tol.length) {
     const sorted = tol.slice().sort((a, b) => a.win - b.win || a.tick - b.tick);
     const minW = sorted[0].win;
@@ -371,6 +374,15 @@ function verifyLevel(level, beam, showTaps) {
   }
   if (showTaps) console.log('  탭 틱(1/60s): ' + taps.join(','));
   return { id: level.id, solved: true, time: fin.t, taps: taps.length, minWin: tol.length ? Math.min(...tol.map(a => a.win)) : null };
+}
+
+// 다른 도구용: 해답 탭 스케줄(1/60초 틱 번호, 군더더기 제거 + 가운데 정렬)
+function solveLevel(level, beam) {
+  const r = search(level, beam || 3000);
+  if (!r.solved) return { solved: false, best: r.best };
+  let taps = centerTaps(level, pruneTaps(level, r.taps));
+  if (!simulate(level, taps).done) taps = r.taps;
+  return { solved: true, taps };
 }
 
 function nearestSection(level, x) {
@@ -563,11 +575,31 @@ function selfTest() {
     const us = Number(process.hrtime.bigint() - t0) / 1000 / n;
     ok(us < 5, `스텝 비용 ${us.toFixed(3)}µs (600 오브젝트)`);
   }
+  // 젬: 획득/놓침/콤보/배율/점수, 물리 무영향, startX 뒤 젬 무효
+  {
+    const gems = []; for (let i = 0; i < 40; i++) gems.push({ t: 'gem', x: 300 + i * 30, y: 17 });
+    gems.push({ t: 'gem', x: 1600, y: 200 }); // 놓침
+    gems.push({ t: 'gem', x: 1700, y: 17 }, { t: 'coin', x: 1800, y: 17 });
+    const r = Engine.create(L(gems)); for (let i = 0; i < 330; i++) r.update(1 / 60);
+    const s = r.state, ev = r.events, g = ev.filter(e => e.type === 'gem'), m = ev.filter(e => e.type === 'gemmiss');
+    // 1~15: x1, 16~31: x2, 32~40: x3 → 15*10 + 16*20 + 9*30 = 740, 놓침 후 1개 10, 코인 250
+    ok(s.gems === 41 && r.gemCount === 42 && s.maxCombo === 40 && s.combo === 1 && m.length === 1 && m[0].comboLost === 40, `젬 획득 ${s.gems}/${r.gemCount}, 최대콤보 ${s.maxCombo}, 놓침 ${m.length}`);
+    ok(s.score === 740 + 10 + 250 && g[15].mult === 2 && g[31].mult === 3, `젬 점수 ${s.score} (= 1000), 배율 16→x2, 32→x3`);
+    const a = Engine.create(L(gems), { quiet: true }), b = Engine.create(L([]), { quiet: true });
+    a.press(); b.press(); for (let i = 0; i < 600; i++) { a.step(); b.step(); }
+    ok(a.state.x === b.state.x && a.state.y === b.state.y && a.state.gems > 0, 'quiet 모드에서도 젬 집계, 물리 무영향');
+    const c = Engine.create(L(gems), { startX: 800 }); for (let i = 0; i < 30; i++) c.update(1 / 60);
+    ok(!c.events.some(e => e.type === 'gemmiss') && c.state.combo > 0 && c.state.gems < 10, `startX 뒤 젬은 무효 (획득 ${c.state.gems}, 놓침 이벤트 없음)`);
+  }
   console.log(fail ? `  ${fail}개 실패` : '  전부 통과');
   return fail;
 }
 
+module.exports = { search, solveLevel, simulate, pruneTaps, centerTaps, tolerance, TEST_LEVELS, TICK_STEPS, withGems };
+
 // ===== main =====
+if (require.main === module) main();
+function main() {
 const args = process.argv.slice(2);
 const beamI = args.indexOf('--beam');
 const BEAM = beamI >= 0 ? +args[beamI + 1] : 3000;
@@ -592,3 +624,4 @@ if (names[0] === 'test') {
 const results = levels.map(l => verifyLevel(l, BEAM, showTaps));
 console.log('\n요약: ' + results.map(r => `${r.id}=${r.solved ? 'OK(' + (r.minWin != null ? r.minWin + 'f' : '-') + ')' : 'FAIL'}`).join('  '));
 process.exitCode = fails || results.some(r => !r.solved && r.id !== 'impossible') ? 1 : 0;
+}

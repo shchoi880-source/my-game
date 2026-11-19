@@ -3,8 +3,12 @@
 // 좌표: 월드 x 오른쪽+, y 위쪽+(지면 0). 그릴 때는 월드 변환 안에서 (x, -y) 로 그린다.
 (() => {
   const G = window.G;
-  const W = G.W || 960, H = G.H || 540, TAU = Math.PI * 2;
-  const GROUND_Y = 430, PLAYER_SX = 280;
+  let W = G.W || 960, H = G.H || 540;
+  const TAU = Math.PI * 2;
+  // 지면은 화면 아래에서 110px 위 (기본 540 → 430). 화면이 커지면 하늘이 더 보임
+  let GROUND_Y = H - 110;
+  const PLAYER_SX = 280;
+  if (G.onResize) G.onResize(() => { W = G.W; H = G.H; GROUND_Y = H - 110; });
   const SIZE = () => (G.PHYS && G.PHYS.size) || 34;
   const DEFAULT_THEME = { bg: '#0b0f2a', bg2: '#1b0f3a', accent: '#29f0ff', accent2: '#ff3df2', ground: '#121a44' };
   const PLAYER_COL = '#3dffb0';
@@ -123,7 +127,7 @@
     return e.g;
   }
   const STARS = [];
-  (() => { const r = G.mulberry ? G.mulberry(777) : Math.random; for (let i = 0; i < 90; i++) STARS.push({ x: r() * W * 2, y: r() * 330, d: 0.3 + r() * 0.7, s: r() < 0.12 ? 2.5 : 1.3, ph: r() * TAU }); })();
+  (() => { const r = G.mulberry ? G.mulberry(777) : Math.random; for (let i = 0; i < 90; i++) STARS.push({ x: r() * 2800, y: r(), d: 0.3 + r() * 0.7, s: r() < 0.12 ? 2.5 : 1.3, ph: r() * TAU }); })();
 
   // 오브젝트 정렬/인덱스 캐시
   const objCache = new WeakMap();
@@ -132,11 +136,12 @@
     let e = objCache.get(objects);
     if (e && e.n === objects.length) return e;
     const arr = [], gaps = [];
-    let ext = 120, ci = 0;
+    let ext = 120, ci = 0, gi = 0;
     for (let i = 0; i < objects.length; i++) {
       const o = objects[i];
       if (!o) continue;
       if (o.t === 'coin') { if (o._ci == null) { try { o._ci = ci; } catch (er) { /* frozen */ } } ci++; }
+      if (o.t === 'gem') { if (o._gi == null) { try { o._gi = gi; } catch (er) { /* frozen */ } } gi++; }
       if (o.t === 'gap') { gaps.push(o); continue; }
       arr.push(o);
       const ex = (o.w || 0) + (o.r || 0) * 2 + Math.abs(o.ax || 0) * 2 + 60;
@@ -156,6 +161,7 @@
     run: null, trail: new Float32Array(TRAIL_N * 3), head: 0, count: 0, sample: 0,
     wasGrounded: true, squash: 0, stretch: 0, rot: 0, lastT: 0, dt: 0.016,
     secIdx: -1, banner: null, blinkT: 2.5, blink: 0,
+    gemSet: new Set(), // 이번 판에 먹은 젬 번호(엔진이 state.gems 배열을 안 줄 때 대비)
   };
   function playerCenter(st, out) {
     const s = SIZE();
@@ -177,6 +183,7 @@
     if (rs.run !== run) {
       rs.run = run; rs.count = 0; rs.head = 0; rs.wasGrounded = true; rs.squash = 0; rs.stretch = 0; rs.rot = 0;
       rs.banner = null; rs.secIdx = sectionAt(level, st.x);
+      rs.gemSet.clear();
     }
     // 트레일: 프레임마다 샘플
     if (!st.dead) {
@@ -225,7 +232,7 @@
   function drawBackground(ctx, theme, camX, camY, t, bt) {
     const pulse = bt.pulse;
     // 하늘
-    const sky = cachedGrad(ctx, 'sky' + theme.bg + theme.bg2, () => {
+    const sky = cachedGrad(ctx, 'sky' + theme.bg + theme.bg2 + GROUND_Y, () => {
       const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
       g.addColorStop(0, mix(theme.bg, '#000000', 0.35));
       g.addColorStop(0.55, theme.bg);
@@ -249,11 +256,11 @@
       let x = (s.x - camX * 0.03 * s.d) % (W + 40); if (x < -20) x += W + 40;
       const a = 0.35 + 0.45 * Math.sin(t * 2 * s.d + s.ph) + 0.2 * pulse;
       ctx.globalAlpha = Math.max(0.05, Math.min(1, a));
-      ctx.fillRect(x, s.y + oy * 0.5, s.s, s.s);
+      ctx.fillRect(x, s.y * (GROUND_Y - 100) + oy * 0.5, s.s, s.s);
     }
     ctx.globalAlpha = 1;
-    // 레트로 태양
-    const sunX = W * 0.72, sunY = 250 + oy * 0.4, sunR = 105 + pulse * 3;
+    // 레트로 태양 (지면 기준 높이 → 화면 비율이 바뀌어도 지평선에 걸침)
+    const sunX = W * 0.72, sunY = GROUND_Y - 180 + oy * 0.4, sunR = 105 + pulse * 3;
     glow(ctx, sunX, sunY, 5.2, theme.accent2, 0.35 + 0.25 * pulse);
     const sg = cachedGrad(ctx, 'sun' + theme.accent + theme.accent2, () => {
       const g = ctx.createLinearGradient(0, -110, 0, 110);
@@ -304,12 +311,14 @@
     // 지평선 글로우
     ctx.globalCompositeOperation = 'lighter';
     const hg = cachedGrad(ctx, 'hz' + theme.accent, () => {
-      const g = ctx.createLinearGradient(0, GROUND_Y - 120, 0, GROUND_Y);
+      const g = ctx.createLinearGradient(0, -120, 0, 0);
       g.addColorStop(0, rgba(theme.accent, 0)); g.addColorStop(1, rgba(theme.accent, 0.35));
       return g;
     });
     ctx.globalAlpha = 0.35 + 0.65 * pulse;
-    ctx.fillStyle = hg; ctx.fillRect(-40, GROUND_Y - 120 + camY, W + 80, 120);
+    ctx.save(); ctx.translate(0, GROUND_Y + camY);
+    ctx.fillStyle = hg; ctx.fillRect(-40, -120, W + 80, 120);
+    ctx.restore();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }
@@ -489,6 +498,23 @@
     ctx.restore();
     if (((t * 0.7 + o.x * 0.001) % 1) < 0.15) G.spr && G.spr('star_04', cx + 8, cy - 9, { scale: 0.35, tint: '#ffffff', add: true, alpha: 0.9, rot: t * 3 });
   }
+  // 리듬 젬: 작은(≈14px) 네온 다이아몬드. 흔들림 + 박자 맥동 + 반 박마다 색 순환
+  const GEM_COLS = ['#29f0ff', '#ff3df2', '#ffe14d', '#3dffb0'];
+  function drawGem(ctx, o, t, bt, theme, gi) {
+    const half = Math.floor(bt.beat * 2);
+    const col = GEM_COLS[(half + gi) & 3];
+    const cx = o.x, cy = -o.y + Math.sin(t * 4 + o.x * 0.02) * 3;
+    const s = 1 + 0.18 * bt.pulse;
+    const hw = 6 * s, hh = 8.5 * s;
+    glow(ctx, cx, cy, 0.32 + 0.12 * bt.pulse, col, 0.75);
+    ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx + hw, cy); ctx.lineTo(cx, cy + hh); ctx.lineTo(cx - hw, cy); ctx.closePath();
+    ctx.fillStyle = rgba(col, 0.55); ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 5; ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
+    // 윗면 반짝임
+    ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx + hw * 0.5, cy - hh * 0.2); ctx.lineTo(cx, cy); ctx.lineTo(cx - hw * 0.5, cy - hh * 0.2); ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+  }
   function starPath(ctx, x, y, R, r, n) {
     ctx.beginPath();
     for (let i = 0; i < n * 2; i++) {
@@ -558,7 +584,8 @@
     neonStroke(ctx, col, 2, true);
     rr(ctx, -s / 2 + 5, -s / 2 + 5, s - 10, s - 10, 4);
     ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
-    // 얼굴
+    // 얼굴: 몸통은 돌아도 얼굴은 항상 똑바로 (착지 후 누워 보이지 않게)
+    ctx.rotate(-rot);
     const vy = (opt && opt.vy) || 0;
     const look = G.clamp ? G.clamp(-vy / 900 * 3, -3, 3) : 0;
     const blink = opt && opt.blink;
@@ -678,6 +705,14 @@
             else if (cam.coinGhost) { ctx.globalAlpha = 0.25; drawCoin(ctx, o, t); ctx.globalAlpha = 1; }
             break;
           }
+          case 'gem': {
+            const gi = o.gi != null ? o.gi : o._gi;
+            const gs = st.gems;
+            const got = o._taken || o.taken || o.got || rs.gemSet.has(gi) ||
+              (gs && typeof gs === 'object' && gi != null && gs[gi]);
+            if (!got) drawGem(ctx, o, t, bt, theme, gi || 0);
+            break;
+          }
         }
       }
     }
@@ -697,7 +732,8 @@
     const s = SIZE();
     playerCenter(st, pc);
     cam.x = pc.x - s / 2 - PLAYER_SX;
-    const target = Math.max(0, pc.y + s / 2 - 290);
+    // 플레이어 윗변이 화면 위에서 약 140px 아래에 머물도록(화면이 높으면 덜 따라감)
+    const target = Math.max(0, pc.y + s / 2 - (GROUND_Y - 140));
     if (snap) cam.y = target;
     else cam.y += (target - cam.y) * Math.min(1, dt * (target > cam.y ? 5 : 3.5));
     return cam;
@@ -705,8 +741,11 @@
 
   G.render = {
     anchor: 'bl', // 'bl' = state.x/y 가 히트박스 왼쪽-아래, 'center' = 중심
-    GROUND_Y, PLAYER_SX, DEFAULT_THEME, PLAYER_COL,
+    get GROUND_Y() { return GROUND_Y; },
+    PLAYER_SX, DEFAULT_THEME, PLAYER_COL, GEM_COLS,
     world, newCam, updateCam, playerCenter,
+    // 이번 판에 먹은 젬 표시(엔진이 state.gems 배열을 주면 없어도 됨). 판이 바뀌면 자동 초기화
+    gemTaken(gi) { if (gi != null) rs.gemSet.add(gi); },
     background: (ctx, theme, camX, camY) => drawBackground(ctx, Object.assign({}, DEFAULT_THEME, theme || {}), camX || 0, camY || 0, nowSec(), getBeat(null)),
     beat: getBeat,
     cube: drawCube,
@@ -736,9 +775,9 @@
   const fx = {
     shakeX: 0, shakeY: 0, punchAmt: 0,
     trauma: 0, punchV: 0, hitT: 0, slowF: 1, slowT: 0,
-    flashA: 0, flashCol: '#ffffff', glitchT: 0, combo: 0, comboT: 0,
+    flashA: 0, flashCol: '#ffffff', glitchT: 0, combo: 0, comboT: 0, edgeA: 0, edgeCol: '#ffe14d',
     count() { let n = 0; for (let i = 0; i < MAX; i++) if (P[i].on) n++; return n; },
-    clear() { for (let i = 0; i < MAX; i++) P[i].on = false; this.trauma = 0; this.flashA = 0; this.glitchT = 0; this.hitT = 0; this.slowT = 0; this.slowF = 1; this.punchV = 0; this.punchAmt = 0; this.shakeX = this.shakeY = 0; },
+    clear() { for (let i = 0; i < MAX; i++) P[i].on = false; this.trauma = 0; this.flashA = 0; this.edgeA = 0; this.glitchT = 0; this.hitT = 0; this.slowT = 0; this.slowF = 1; this.punchV = 0; this.punchAmt = 0; this.shakeX = this.shakeY = 0; },
     // --- 시간 조작 ---
     hitstop(s) { this.hitT = Math.max(this.hitT, s); },
     slowmo(f, s) { this.slowF = f; this.slowT = s; },
@@ -758,6 +797,7 @@
       this.punchV = Math.max(0, this.punchV - dt * 0.5);
       this.punchAmt = this.punchV;
       this.flashA = Math.max(0, this.flashA - dt * 3.2);
+      this.edgeA = Math.max(0, this.edgeA - dt * 1.6);
       this.glitchT = Math.max(0, this.glitchT - dt);
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) this.combo = 0; }
       const sdt = dt * this.timeScale();
@@ -859,6 +899,17 @@
         ctx.fillStyle = '#10e0ff'; ctx.fillRect(W - 10, 0, 10, H); ctx.fillRect(0, H - 6, W, 6);
         ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
       }
+      // 화면 가장자리 색 번쩍임(콤보 마일스톤) — 가운데는 가리지 않음
+      if (this.edgeA > 0.004) {
+        const e = Math.min(1, this.edgeA), d = 70 + 40 * e;
+        ctx.globalCompositeOperation = 'lighter';
+        const c0 = rgba(this.edgeCol, 0.55 * e), c1 = rgba(this.edgeCol, 0);
+        let g = ctx.createLinearGradient(0, 0, d, 0); g.addColorStop(0, c0); g.addColorStop(1, c1); ctx.fillStyle = g; ctx.fillRect(0, 0, d, H);
+        g = ctx.createLinearGradient(W, 0, W - d, 0); g.addColorStop(0, c0); g.addColorStop(1, c1); ctx.fillStyle = g; ctx.fillRect(W - d, 0, d, H);
+        g = ctx.createLinearGradient(0, 0, 0, d); g.addColorStop(0, c0); g.addColorStop(1, c1); ctx.fillStyle = g; ctx.fillRect(0, 0, W, d);
+        g = ctx.createLinearGradient(0, H, 0, H - d); g.addColorStop(0, c0); g.addColorStop(1, c1); ctx.fillStyle = g; ctx.fillRect(0, H - d, W, d);
+        ctx.globalCompositeOperation = 'source-over';
+      }
       if (this.flashA > 0.004) {
         ctx.globalAlpha = Math.min(1, this.flashA);
         ctx.fillStyle = this.flashCol; ctx.fillRect(-20, -20, W + 40, H + 40);
@@ -900,7 +951,7 @@
         const s = spawn(0, K_STREAK, x, -y); s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp; s.drag = 5; s.max = R(0.2, 0.35); s.size = R(2, 3.5); s.color = i % 3 ? '#ffe14d' : '#ffffff';
       }
       const fl = spawn(0, K_SPR, x, -y); fl.name = 'spark_04'; fl.size = 0.3; fl.size2 = 0.9; fl.max = 0.25; fl.color = '#ffe14d';
-      const t = spawn(0, K_TEXT, x + 10, -y - 40); t.text = this.combo > 1 ? '아슬! x' + this.combo : '아슬!'; t.size = Math.min(40, 22 + this.combo * 3); t.vy = -70; t.drag = 2; t.max = 0.8; t.color = this.combo > 2 ? '#ff7df5' : '#ffe14d'; t.rot = R(-0.15, 0.15);
+      const t = spawn(0, K_TEXT, x + 10, -y - 40); t.text = this.combo > 1 ? '아슬! ×' + this.combo : '아슬!'; t.size = Math.min(28, 18 + this.combo * 2); t.vy = -70; t.drag = 2; t.max = 0.8; t.color = this.combo > 2 ? '#ff7df5' : '#ffe14d'; t.rot = R(-0.15, 0.15);
       this.punch(0.025); this.shake(0.12);
     },
     death(x, y, color) {
@@ -946,6 +997,39 @@
         const s = spawn(0, K_STREAK, x + R(-18, 18), -y); s.vx = R(-60, 60); s.vy = -R(300, 620); s.drag = 4; s.max = R(0.25, 0.4); s.size = R(2, 3.5); s.color = i % 3 ? color : '#ffffff';
       }
       this.punch(0.02);
+    },
+    // 젬 획득: 작은 반짝임 + 은은한 링 + 작은 "+10"(시야를 가리지 않게 작고 짧게)
+    gemPickup(x, y, color, text) {
+      color = color || '#29f0ff';
+      const r = spawn(0, K_RING, x, -y); r.size = 4; r.size2 = 22; r.max = 0.22; r.color = color; r.drag = 2; r.a = 0.8;
+      for (let i = 0; i < 6; i++) {
+        const a = i / 6 * TAU + R(-0.3, 0.3), sp = R(90, 170);
+        const s = spawn(0, K_SPR, x, -y); s.name = 'star_04'; s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp; s.drag = 5; s.max = R(0.2, 0.32); s.size = R(0.12, 0.18); s.size2 = 0.02; s.color = i % 2 ? '#ffffff' : color;
+      }
+      if (text) {
+        const t = spawn(0, K_TEXT, x + 6, -y - 18); t.text = text; t.size = 13; t.vy = -110; t.drag = 3; t.max = 0.4; t.color = color;
+      }
+    },
+    // 콤보 끊김: 작은 붉은 파편 + "BREAK"
+    comboBreak(x, y, combo) {
+      for (let i = 0; i < 8; i++) {
+        const a = R(-Math.PI, 0), sp = R(80, 200);
+        const d = spawn(0, K_DOT, x, -y); d.vx = Math.cos(a) * sp; d.vy = Math.sin(a) * sp; d.g = 500; d.max = R(0.3, 0.5); d.size = R(2.5, 4); d.color = '#ff3d6a';
+      }
+      const t = spawn(0, K_TEXT, x, -y - 30); t.text = combo >= 10 ? 'BREAK ' + combo : 'BREAK'; t.size = 15; t.vy = -60; t.drag = 2; t.max = 0.55; t.color = '#ff3d6a';
+      this.shake(0.08);
+    },
+    // 콤보 마일스톤(50, 100, …): 큰 링 + 가장자리 번쩍임 + 화면 문구
+    milestone(x, y, combo, color) {
+      color = color || '#ffe14d';
+      const r = spawn(0, K_RING, x, -y); r.size = 20; r.size2 = 260; r.max = 0.6; r.color = color; r.drag = 6;
+      const r2 = spawn(0, K_RING, x, -y); r2.size = 10; r2.size2 = 160; r2.max = 0.45; r2.color = '#ffffff'; r2.drag = 3;
+      for (let i = 0; i < 16; i++) {
+        const a = i / 16 * TAU, sp = R(260, 420);
+        const s = spawn(0, K_STREAK, x, -y); s.vx = Math.cos(a) * sp; s.vy = Math.sin(a) * sp; s.drag = 4; s.max = 0.4; s.size = 3; s.color = i % 2 ? color : '#ffffff';
+      }
+      const t = spawn(1, K_TEXT, W / 2, 128); t.text = combo + ' COMBO!'; t.size = 40; t.vy = -20; t.drag = 1; t.max = 1.1; t.color = color;
+      this.edgeCol = color; this.edgeA = 1; this.punch(0.035);
     },
     checkpoint(x, y) {
       const r = spawn(0, K_RING, x, -y); r.size = 6; r.size2 = 46; r.max = 0.45; r.color = CP_COL; r.drag = 3; r.vr = 1;

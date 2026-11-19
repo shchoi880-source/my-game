@@ -2,7 +2,6 @@
 // 메인: 로딩, 장면 전환, 입력 라우팅, 루프 (docs/SPEC.md §4)
 (() => {
   const G = window.G;
-  const { W, H } = G;
   const ctx = G.ctx;
 
   G.scenes = G.scenes || {};
@@ -29,7 +28,7 @@
   // ===== 입력 =====
   const toLogical = e => {
     const r = G.canvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+    return { x: (e.clientX - r.left) / r.width * G.W, y: (e.clientY - r.top) / r.height * G.H };
   };
   let audioReady = false;
   const wakeAudio = () => {
@@ -86,6 +85,7 @@
       scene.draw(ctx);
     } else {
       // 로딩 화면
+      const W = G.W, H = G.H;
       ctx.fillStyle = '#070a1c';
       ctx.fillRect(0, 0, W, H);
       G.text('NEON DASH', W / 2, H / 2 - 30, 48, '#29f0ff');

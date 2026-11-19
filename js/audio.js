@@ -204,8 +204,142 @@
     },
   };
 
+  // ===================== 리듬 젬 (글래스 마림바) =====================
+  // 사인 f + 삼각 4f(0.25×), 3ms 어택, 지수 감쇠(기음 140ms / 배음 60ms), 로우패스 3.5k→6k(콤보)
+  const GEM_SHAPE = [0, 1, 2, 3, 2, 4, 3, 5];
+  const GEM_V = 0.07, GEM_MAX = 4;
+  const gemVoices = [];
+
+  function glass(t, f, v, cut, harm) {
+    const vca = ctx.createGain(), flt = ctx.createBiquadFilter();
+    flt.type = 'lowpass'; flt.Q.value = 0.7; flt.frequency.setValueAtTime(cut, t);
+    vca.gain.value = 1;
+    flt.connect(vca); vca.connect(sfxGain);
+    const a = 0.003, oscs = [];
+    const part = (type, freq, pv, dec) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(Math.max(0.0002, pv), t + a);
+      g.gain.exponentialRampToValueAtTime(0.0002, t + a + dec);
+      o.connect(g); g.connect(flt);
+      o.start(t); o.stop(t + a + dec + 0.02);
+      oscs.push(o);
+    };
+    part('sine', f, v, 0.14);
+    if (harm !== false && f * 4 < 20000) part('triangle', f * 4, v * 0.25, 0.06);
+    return { vca, oscs, end: t + a + 0.16 };
+  }
+
+  // 젬 보이스 풀: 최대 4개, 넘으면 가장 오래된 것을 5ms 페이드로 훔침
+  function gemVoice(t, f, v, cut, harm) {
+    const now = ctx.currentTime;
+    for (let i = gemVoices.length - 1; i >= 0; i--) if (gemVoices[i].end < now) gemVoices.splice(i, 1);
+    while (gemVoices.length >= GEM_MAX) {
+      const old = gemVoices.shift();
+      try {
+        old.vca.gain.cancelScheduledValues(now);
+        old.vca.gain.setValueAtTime(old.vca.gain.value, now);
+        old.vca.gain.linearRampToValueAtTime(0, now + 0.005);
+        for (const o of old.oscs) o.stop(now + 0.01);
+      } catch (e) { /* 이미 끝남 */ }
+    }
+    const vo = glass(t, f, v, cut, harm);
+    gemVoices.push(vo);
+    return vo.end;
+  }
+
+  // 음악 16분 격자 양자화: 다음 격자점이 40ms 이내면 그때, 아니면 지금
+  function quantTime(now, maxWait, grid) {
+    const r = run;
+    if (r && r.alive && r.clock === 'ctx') {
+      const g = r.sd * (grid || 1);
+      const next = r.startTime + Math.ceil((now - r.startTime) / g - 1e-6) * g;
+      if (next - now <= maxWait) return Math.max(now, next);
+    }
+    return now;
+  }
+  // 스케줄 시각(컨텍스트 시간) → 곡 시간
+  const songTimeAt = when => (run && run.alive && run.clock === 'ctx' ? when - run.startTime : time());
+
+  function gemNotes(when) {
+    const c = chordAt(songTimeAt(when));
+    const tones = c.tones.slice(0, 4);
+    const base = wrap(c.root, 80);                // 레지스터 ≈ 84~96 (리드/아르페지오 위)
+    const at = k => base + tones[k % tones.length] + 12 * Math.floor(k / tones.length);
+    return { c, base, at };
+  }
+
+  function gem(now, o) {
+    const combo = Math.max(1, o.combo | 0 || 1);
+    const t = quantTime(now, 0.04, 1);
+    const { base, at, c } = gemNotes(t);
+    const k = GEM_SHAPE[(combo - 1) % 8];
+    const bright = Math.min(1, combo / 50);
+    const cut = 3500 + 2500 * bright;
+    const v = GEM_V * (combo > 30 ? Math.pow(10, -2 * Math.min(1, (combo - 30) / 10) / 20) : 1);
+    let end = gemVoice(t, mtof(at(k)), v, cut);
+    nz(null, sfxGain, t, 0.035, 0.03, 'highpass', 7000, { q: 0.7 });
+    if (combo % 8 === 0) { // 프레이즈 완성: 옥타브 위 근음+5도 + 32분 반짝임 3음
+      const fifth = c.tones.indexOf(7) >= 0 ? 7 : (c.tones[2] || 7);
+      end = Math.max(end, gemVoice(t, mtof(base + 12), v * 0.6, cut, false));
+      gemVoice(t, mtof(base + 12 + fifth), v * 0.5, cut, false);
+      const s32 = run && run.alive ? run.sd / 2 : 0.045;
+      for (let i = 0; i < 3; i++) {
+        const tt = t + s32 * (i + 1);
+        glassLite(tt, mtof(at(3 + i)), v * 0.22, cut);
+      }
+      end = Math.max(end, t + s32 * 3 + 0.16);
+    }
+    return end;
+  }
+  // 반짝임용 초경량 보이스(풀 밖, 사인 1개)
+  function glassLite(t, f, v, cut) {
+    if (f > 12000) f /= 2;
+    syn(null, sfxGain, t, 0.08, [f], { type: 'sine', v, cut, a: 0.003 });
+  }
+
+  function gemmiss(now) {
+    const c = chordAt(time());
+    const m = wrap(c.root, 48);
+    return syn(null, sfxGain, now, 0.2, [mtof(m)], { type: 'sine', v: 0.03, cut: 1200, a: 0.006 });
+  }
+
+  function milestone(now, o) {
+    const r = run;
+    const t = r && r.alive && r.clock === 'ctx' ? quantTime(now, r.sd * 2 + 0.001, 2) : now; // 다음 8분 박
+    const { at } = gemNotes(t);
+    const v = GEM_V * 1.41;                     // 젬 대비 +3dB
+    const s32 = r && r.alive ? r.sd / 2 : 0.045;
+    const steps = [0, 1, 2, 3, 4];
+    steps.forEach((k, i) => gemVoice(t + i * s32, mtof(at(k)), v * (0.7 + i * 0.075), 5000 + i * 400));
+    // 스웰: 올라가는 필터 노이즈 (임팩트 직전까지)
+    nz(null, sfxGain, t, s32 * 5, 0.04, 'bandpass', 1500, { f1: 7000, q: 1.5, a: s32 * 4.5 });
+    // 부드러운 임팩트
+    const ti = t + s32 * 5;
+    syn(null, sfxGain, ti, 0.3, [90], { type: 'sine', v: v * 1.2, slide: 0.5, sd: 0.25 });
+    nz(null, sfxGain, ti, 0.25, 0.05, 'lowpass', 1800, { f1: 300 });
+    gemVoice(ti, mtof(at(0) + 12), v * 0.8, 6000);
+    return ti + 0.35;
+  }
+
+  function chordAt(sec) {
+    const r = run;
+    const tr = (r && r.tr) || getTrack('lv1');
+    const t = sec == null ? time() : Math.max(0, +sec || 0);
+    const bar = Math.floor(t * tr.bpm / 240);
+    const ch = tr.chords[((bar % tr.chords.length) + tr.chords.length) % tr.chords.length];
+    return { root: tr.key + ch.r, tones: ch.tones.map(x => x - ch.r) };
+  }
+
+  const GEM_FX = { gem, gemmiss, milestone };
+
   function sfx(name, opts) {
     if (!ctx || !flag('sfx') || ctx.state !== 'running') return;
+    if (GEM_FX[name]) { // 젬 계열: 자체 보이스 풀/양자화, 디바운스·전역 상한 미적용
+      try { GEM_FX[name](ctx.currentTime + 0.002, opts || {}); } catch (e) { /* 무시 */ }
+      return;
+    }
     const fn = SFX[name];
     if (!fn) return;
     const now = ctx.currentTime;
@@ -723,6 +857,7 @@
     preload, init, resume, sfx,
     music: {
       start, stop, duck, time, beat, setLayer,
+      chordAt: sec => { try { return chordAt(sec); } catch (e) { return { root: 57, tones: [0, 3, 7] }; } },
       playing: () => !!(run && run.alive),
       layer: () => layer,
       track: () => (run ? run.id : null),

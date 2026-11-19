@@ -3,8 +3,11 @@
 window.G = window.G || {};
 (() => {
   const G = window.G;
-  const W = 960, H = 540, TAU = Math.PI * 2;
-  G.W = W; G.H = H; G.TAU = TAU;
+  const TAU = Math.PI * 2;
+  // 논리 화면 크기: 기본 960×540(16:9). 화면 비율에 맞춰 resize()에서 넓이/높이를 늘림
+  G.W = 960; G.H = 540; G.TAU = TAU;
+  G.resizeHooks = [];
+  G.onResize = fn => { G.resizeHooks.push(fn); };
   G.FONT = '"KenneyFuture","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif';
 
   // ===== 캔버스 =====
@@ -17,14 +20,29 @@ window.G = window.G || {};
   G.isTouch = () => mq('(pointer: coarse)') || (!mq('(pointer: fine)') && (navigator.maxTouchPoints || 0) > 0);
   G.resize = () => {
     if (!canvas) return;
-    G.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const vw = window.innerWidth, vh = window.innerHeight;
-    G.scale = Math.min(vw / W, vh / H);
+    const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
     G.portrait = G.isTouch() && vh > vw * 1.05;
-    canvas.style.width = Math.floor(W * G.scale) + 'px';
-    canvas.style.height = Math.floor(H * G.scale) + 'px';
-    canvas.width = Math.floor(W * G.scale * G.dpr);
-    canvas.height = Math.floor(H * G.scale * G.dpr);
+    // 1) 화면 비율에 맞춰 논리 크기 결정 → 폰마다 검은 띠 없이 꽉 채움
+    //    길쭉한 폰(19.5:9 등): 높이 540 고정, 가로를 넓힘(앞이 더 보임)
+    //    태블릿(4:3 등): 가로 960 고정, 세로를 늘림(하늘이 더 보임)
+    const aspect = Math.max(4 / 3, Math.min(2.4, vw / vh));
+    let w, h;
+    if (aspect >= 16 / 9) { h = 540; w = 540 * aspect; } else { w = 960; h = 960 / aspect; }
+    // 2) CSS 픽셀 정수로 맞춰서 흐림 방지
+    const scale = Math.min(vw / w, vh / h);
+    const cssW = Math.max(1, Math.round(w * scale)), cssH = Math.max(1, Math.round(h * scale));
+    // 3) 기기 해상도(DPR)대로 선명하게. 너무 큰 화면은 성능을 위해 총 픽셀 수 제한
+    let dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const maxPx = 4.2e6;
+    if (cssW * cssH * dpr * dpr > maxPx) dpr = Math.sqrt(maxPx / (cssW * cssH));
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    G.scale = cssW / w;
+    G.W = w; G.H = cssH / G.scale;
+    G.dpr = canvas.width / cssW;
+    for (const fn of G.resizeHooks) { try { fn(); } catch (e) { console.warn(e); } }
   };
   if (canvas) {
     window.addEventListener('resize', G.resize);
@@ -163,6 +181,10 @@ window.G = window.G || {};
   };
 
   G.vibrate = p => {
-    try { if (data.haptics && navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 미지원 */ }
+    try {
+      const ua = navigator.userActivation;
+      if (ua && !ua.hasBeenActive) return; // 사용자가 화면을 누르기 전엔 브라우저가 막음
+      if (data.haptics && navigator.vibrate) navigator.vibrate(p);
+    } catch (e) { /* 미지원 */ }
   };
 })();
