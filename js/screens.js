@@ -351,7 +351,7 @@
         R.neonStroke(ctx, '#29f0ff', 2);
         R.glowText(ctx, '화면을 터치해서 시작', 0, 1, 26, '#ffffff', { glow: 0.6 });
         ctx.restore();
-        R.txt(ctx, 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, H - 140, 14, 'rgba(255,255,255,0.75)', { weight: 600, stroke: 4 });
+        R.txt(ctx, G.isTouch() ? '탭 = 점프   공중에서 한 번 더 = 2단 점프' : 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, H - 140, 14, 'rgba(255,255,255,0.75)', { weight: 600, stroke: 4 });
       }
       const sd = G.save && G.save.data;
       if (sd && sd.totalAttempts) R.txt(ctx, '총 시도 ' + sd.totalAttempts + '회', W - 20, H - 18, 14, 'rgba(255,255,255,0.5)', { align: 'right', weight: 600 });
@@ -881,14 +881,14 @@
     const R = RN();
     const k = eob(d.t / 0.22), a = d.t < 0.7 ? 1 : 1 - (d.t - 0.7) / 0.3;
     ctx.save(); ctx.globalAlpha = clamp(a, 0, 1);
-    ctx.translate(W / 2, H / 2 - 40); ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
-    R.glowText(ctx, d.pct + '%', 0, 0, 104, d.nb ? '#ffe14d' : '#ffffff', { glow: 0.9 });
-    if (d.score > 0) R.txt(ctx, 'SCORE ' + fmtNum(d.score), 0, 60, 18, 'rgba(255,255,255,0.85)', { weight: 800, stroke: 4 });
+    // 화면 위쪽 1/3에 작게 — 가운데(플레이 영역)를 가리지 않음, 색 깜빡임 없음
+    ctx.translate(W / 2, H * 0.3); ctx.scale(0.8 + 0.2 * k, 0.8 + 0.2 * k);
+    R.glowText(ctx, d.pct + '%', 0, 0, 60, d.nb ? '#ffe14d' : '#ffffff', { glow: 0.5 });
+    if (d.score > 0) R.txt(ctx, 'SCORE ' + fmtNum(d.score), 0, 40, 16, 'rgba(255,255,255,0.85)', { weight: 800, stroke: 4 });
     if (d.nb && d.pct > 0) {
-      const k2 = eob((d.t - 0.08) / 0.25);
-      ctx.save(); ctx.translate(0, d.score > 0 ? 100 : 74); ctx.rotate(-0.05 + Math.sin(d.t * 18) * 0.03); ctx.scale(k2, k2);
-      const hue = ['#ff3df2', '#29f0ff', '#ffe14d', '#3dffb0'][Math.floor(d.t * 14) % 4];
-      R.glowText(ctx, pl.practice ? '연습 최고 기록!' : 'NEW BEST!', 0, 0, 44, hue, { glow: 1 });
+      const k2 = eoc(clamp((d.t - 0.08) / 0.25, 0, 1));
+      ctx.save(); ctx.translate(0, d.score > 0 ? 72 : 50); ctx.globalAlpha *= k2;
+      R.glowText(ctx, pl.practice ? '연습 최고 기록!' : 'NEW BEST!', 0, 0, 28, '#ffe14d', { glow: 0.5 });
       ctx.restore();
     }
     ctx.restore();
