@@ -126,7 +126,7 @@
 
   // ===== 토스트 =====
   const toastS = { msg: '', t: 0 };
-  function toast(msg) { toastS.msg = msg; toastS.t = 2; }
+  function toast(msg, sec) { toastS.msg = msg; toastS.t = sec || 2; }
   function toastDraw(ctx, dt) {
     if (toastS.t <= 0) return;
     toastS.t -= dt;
@@ -285,6 +285,17 @@
   // ===== TITLE =====
   // ======================================================================
   const title = { t: 0 };
+  function installApp() {
+    A.sfx('click');
+    const p = G.pwa || {};
+    if (p.prompt) { p.prompt(); return; }
+    const ua = navigator.userAgent || '';
+    const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+    if (ios) toast(/CriOS|FxiOS|EdgiOS|KAKAOTALK|NAVER/.test(ua) ? 'Safari로 열고 → 공유(□↑) → 홈 화면에 추가' : '아래 공유 버튼(□↑) → 홈 화면에 추가', 6);
+    else if (/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//.test(ua)) toast('⋮ 메뉴 → 다른 브라우저(Chrome)로 열기', 6);
+    else if (/SamsungBrowser/.test(ua)) toast('아래 ≡ 메뉴 → 현재 페이지 추가 → 홈 화면', 6);
+    else toast('오른쪽 위 ⋮ 메뉴 → 홈 화면에 추가', 6);
+  }
   G.scenes.title = {
     enter() {
       title.t = 0;
@@ -340,17 +351,22 @@
       const sd = G.save && G.save.data;
       if (sd && sd.totalAttempts) R.txt(ctx, '총 시도 ' + sd.totalAttempts + '회', W - 20, H - 18, 14, 'rgba(255,255,255,0.5)', { align: 'right', weight: 600 });
       R.txt(ctx, 'v1', 20, H - 18, 12, 'rgba(255,255,255,0.35)', { align: 'left', weight: 600 });
+      // 앱 설치 버튼: 폰에서, 아직 설치 앱으로 실행 중이 아닐 때만
+      if (G.isTouch() && !(G.pwa && G.pwa.installed())) {
+        button(ctx, 'install', W - 196, 16, 180, 48, '앱 설치', installApp, { color: '#3dffb0', size: 20, r: 24 });
+      }
       post(ctx);
     },
     down(x, y) {
       if (busy() || G.portrait) return;
       menuMusic();
+      if (uiDown(x, y)) { G.noLandscapeOnce = true; return; }
       if (title.t < 0.3) return;
       A.sfx('click');
       if (FX()) FX().uiBurst(x, y, '#29f0ff', 14);
       nav('select');
     },
-    up() {},
+    up(x, y) { uiUp(x, y); },
     key(code, down) {
       if (!down || busy()) return;
       if (code === 'Space' || code === 'Enter' || code === 'ArrowUp' || code === 'KeyW') { menuMusic(); A.sfx('click'); nav('select'); }

@@ -47,9 +47,29 @@
   // 터치 기기에서는 pointerdown/touchstart 가 '사용자 활성화'가 아니라서(Chrome Android·iOS Safari)
   // AudioContext.resume()이 거부된다 → 손을 뗄 때(pointerup/touchend)도 오디오를 깨운다.
   G.canvas.addEventListener('touchend', wakeAudio, { passive: true });
+  // ===== 앱 설치(PWA) =====
+  // Chrome/삼성 인터넷: beforeinstallprompt 를 잡아뒀다가 타이틀의 '앱 설치' 버튼에서 띄움
+  let deferred = null, installedNow = false;
+  const mqs = q => { try { return window.matchMedia(q).matches; } catch (e) { return false; } };
+  G.pwa = {
+    prompt: null,
+    installed: () => installedNow || !!navigator.standalone || (mqs('(display-mode: fullscreen)') && !document.fullscreenElement) || mqs('(display-mode: standalone)'),
+  };
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); deferred = e;
+    G.pwa.prompt = () => {
+      const d = deferred; if (!d) return;
+      deferred = null; G.pwa.prompt = null;
+      d.prompt();
+      if (d.userChoice) d.userChoice.then(r => { if (r && r.outcome === 'accepted') installedNow = true; }).catch(() => {});
+    };
+  });
+  window.addEventListener('appinstalled', () => { installedNow = true; deferred = null; G.pwa.prompt = null; });
+
   // 안드로이드 등: 첫 터치 때 전체화면 + 가로 고정 시도(iPhone은 미지원 → 위의 90° 회전으로 처리)
   let lockTried = false;
   const tryLandscape = () => {
+    if (G.noLandscapeOnce) { G.noLandscapeOnce = false; return; }
     if (lockTried || !G.isTouch()) return;
     lockTried = true;
     const so = screen.orientation;
