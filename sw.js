@@ -1,6 +1,6 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'mdef-' + VERSION;
 const ASSETS = [
   './',

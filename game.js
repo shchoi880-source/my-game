@@ -56,10 +56,10 @@
   let S;
   function newGame() {
     S = {
-      mode: 'play', t: 0, n: 1,
+      mode: 'play', t: 0, n: 5,
       px: W / 2, tx: W / 2,
       bullets: [], enemies: [], gates: [], parts: [], texts: [],
-      fireT: 0, spawnT: 1.5, gateT: 2.0,
+      fireT: 0, spawnT: 3.0, gateT: 0.5,
       wave: 1, waveT: 0,
       score: 0, shake: 0, scroll: 0, gateId: 0, overT: 0,
       banner: { text: 'WAVE 1', t: 1.6 },
@@ -74,9 +74,9 @@
 
   function goodOp() {
     const w = S.wave, r = Math.random();
-    if (r < 0.45) return { op: '+', v: randi(2 + w, 6 + w * 3), pulse: 0 };
-    if (r < 0.85) return { op: '×', v: pick([2, 2, 2, 3, 3]), pulse: 0 };
-    if (r < 0.97) return { op: '×', v: 5, pulse: 0 };
+    if (r < 0.5) return { op: '+', v: randi(3 + w * 2, 8 + w * 5), pulse: 0 };
+    if (r < 0.9) return { op: '×', v: pick([2, 2, 2, 3]), pulse: 0 };
+    if (r < 0.98) return { op: '×', v: 5, pulse: 0 };
     return { op: '×', v: 10, pulse: 0 };
   }
   function minusOp() { const w = S.wave; return { op: '−', v: randi(2 + w, 5 + w * 3), pulse: 0 }; }
@@ -112,12 +112,12 @@
   }
 
   // ===== 적 =====
-  const baseHp = () => 3 * Math.pow(1.5, S.wave - 1);
+  const baseHp = () => 4 * Math.pow(2.2, S.wave - 1);
 
   function spawnEnemy(boss) {
     const hp = boss
       ? Math.round(baseHp() * 30 + S.n * 4)
-      : Math.max(1, Math.round(baseHp() * rand(0.6, 1.4) + S.n * rand(0.2, 0.6)));
+      : Math.max(1, Math.round(baseHp() * rand(0.6, 1.4) + S.n * rand(0.08, 0.25)));
     const r = boss ? 46 : 14 + Math.min(22, Math.log10(hp) * 6);
     S.enemies.push({
       x: boss ? W / 2 : rand(r + 8, W - r - 8), y: -r, r, hp, max: hp,
