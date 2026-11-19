@@ -7,7 +7,8 @@ const ASSETS = [
   './', './index.html', './manifest.webmanifest',
   './js/core.js', './js/audio.js', './js/levels.js', './js/gems.js','./js/engine.js', './js/render.js', './js/screens.js', './js/main.js',
   './assets/fx.png', './assets/fx.json', './assets/kenney-future.ttf',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
+  './icons/icon-192.png', './icons/icon-512.png',
+  './icons/icon-maskable-192.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon-180.png',
 ].concat(SFX.map(n => './assets/sfx/' + n + '.ogg'));
 
 self.addEventListener('install', e => {
