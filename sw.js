@@ -1,6 +1,6 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'mdef-' + VERSION;
 const ASSETS = [
   './',
@@ -12,7 +12,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -29,7 +29,7 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.open(CACHE).then(cache =>
       cache.match(e.request, { ignoreSearch: true }).then(cached => {
-        const net = fetch(e.request)
+        const net = fetch(e.request, { cache: 'no-cache' })
           .then(res => { if (res && res.ok) cache.put(e.request, res.clone()); return res; })
           .catch(() => cached || cache.match('./index.html'));
         return cached || net;
