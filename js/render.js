@@ -231,8 +231,448 @@
   }
 
   // ===== 배경 =====
+  // 레벨마다 다른 장소(theme.scene): city(1) / ziggurat(2) / gears(3) / spires(4) / ruins(5)
+  // 규칙: 배경은 낮은 대비·뒤로 물러나게. 먼 층일수록 안개색(fog)에 가깝게.
+  //       빨강·금색 불빛은 지면 띠 근처에 쓰지 않음(위험물·젬 색과 섞이지 않게). shadowBlur·번쩍임 없음.
+  // 정적인 층은 오프스크린 캔버스 띠(폭 SW, 가로로 이어짐)에 한 번만 그리고 매 프레임 drawImage 2번으로 끝냄.
+  const SW = 2048;           // 띠 한 장의 논리 폭(타일 주기)
+  const STRIP_H = 340;       // 띠 높이(지면 위 300 + 아래 40)
+  const STRIP_BASE = 300;    // 띠 안의 지면선 y
+  const layerCache = new Map();
+  if (G.onResize) G.onResize(() => layerCache.clear());
+  function layer(key, w, h, paint) {
+    let c = layerCache.get(key);
+    if (c !== undefined) return c;
+    c = null;
+    try {
+      if (typeof document !== 'undefined' && document.createElement) {
+        // 배경은 부드러워서 해상도를 낮게(최대 1.25배) — 모바일 메모리·채우기 비용 절약
+        const s = Math.max(0.5, Math.min(1.25, (G.scale || 1) * (G.dpr || 1)));
+        c = document.createElement('canvas');
+        c.width = Math.max(1, Math.ceil(w * s)); c.height = Math.max(1, Math.ceil(h * s));
+        const g = c.getContext('2d');
+        if (g) { g.scale(s, s); paint(g, w, h); c.lw = w; c.lh = h; } else c = null;
+      }
+    } catch (e) { c = null; }
+    if (layerCache.size > 40) layerCache.clear();
+    layerCache.set(key, c);
+    return c;
+  }
+  // 가로로 이어지는 띠 그리기(시차 par)
+  function drawStrip(ctx, c, par, camX, y) {
+    if (!c) return;
+    let ox = -((camX * par) % SW);
+    while (ox > -40) ox -= SW;
+    for (let x = ox; x < W + 40; x += SW) ctx.drawImage(c, x, y, c.lw, c.lh);
+  }
+  // 주기 SW 안에서 반복되는 해시/노이즈(띠 이음매가 안 보이게)
+  const hp = (i, n, s) => hash((((i % n) + n) % n) + (s || 0) * 101.3);
+  const pnoise = (x, n, s) => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return hp(i, n, s) * (1 - u) + hp(i + 1, n, s) * u; };
+  // 띠 이음매를 넘는 모양은 왼쪽/오른쪽에 한 번 더 그림
+  function wrap3(g, x, fn) { fn(x); fn(x - SW); fn(x + SW); }
+  function topLine(g, pts) { g.beginPath(); g.moveTo(pts[0], pts[1]); for (let k = 2; k < pts.length; k += 2) g.lineTo(pts[k], pts[k + 1]); }
+
+  // --- 장면별 색: 안개색과 층 색 ---
+  function palette(theme) {
+    const key = theme.bg + theme.bg2 + theme.accent + theme.accent2;
+    const fog = mix(theme.bg2, theme.bg, 0.5);
+    return {
+      key, fog,
+      far: mix(mix(theme.bg2, theme.bg, 0.3), fog, 0.35),          // 먼 층: 하늘과 비슷하게
+      mid: mix(mix(theme.bg, '#000000', 0.45), fog, 0.3),           // 가까운 층: 어둡게(검정 아님)
+      lit: mix(theme.accent, fog, 0.6),                             // 창문/빛줄: 한 가지 색만, 안개 섞어 탁하게
+    };
+  }
+
+  // ===== 먼 층 / 가까운 층 그리기 (오프스크린 1회) =====
+  const B = STRIP_BASE;
+  const SCENES = {
+    city: {
+      far(g, th, P) {
+        const pts = [];
+        for (let x = 0; x <= SW; x += 16) {
+          const n = pnoise(x / 128, 16, 1) * 0.7 + pnoise(x / 51.2, 40, 2) * 0.3;
+          pts.push(x, B - 40 - n * 150);
+        }
+        topLine(g, pts); g.lineTo(SW, STRIP_H); g.lineTo(0, STRIP_H); g.closePath();
+        g.fillStyle = mix(mix(th.bg2, th.bg, 0.4), P.fog, 0.25); g.fill();
+        topLine(g, pts); g.strokeStyle = rgba(th.accent2, 0.14); g.lineWidth = 2; g.stroke();
+      },
+      mid(g, th, P) {
+        const cell = 64, n = SW / cell;
+        for (let i = 0; i < n; i++) {
+          if (hp(i, n, 3) < 0.18) continue;
+          const bw = 34 + hp(i, n, 4) * 26, bh = 40 + hp(i, n, 5) * 150;
+          const bx = i * cell, by = B - bh;
+          g.fillStyle = P.mid; g.fillRect(bx, by, bw, bh + 40);
+          g.fillStyle = rgba(th.accent, 0.2); g.fillRect(bx, by, bw, 2);
+          if (hp(i, n, 6) > 0.75) { g.fillStyle = P.mid; g.fillRect(bx + bw * 0.5 - 1, by - 18, 2, 18); }
+          g.fillStyle = rgba(P.lit, 0.14);
+          for (let wy = by + 10; wy < B - 8; wy += 14) {
+            for (let wx = bx + 6; wx < bx + bw - 6; wx += 10) {
+              if (hash(wx * 0.13 + wy * 0.71 + i) > 0.72) g.fillRect(wx, wy, 4, 6);
+            }
+          }
+        }
+      },
+    },
+    ziggurat: {
+      far(g, th, P) {
+        // 먼 피라미드 + 낮은 언덕
+        const pts = [];
+        for (let x = 0; x <= SW; x += 32) pts.push(x, B - 18 - pnoise(x / 256, 8, 7) * 40);
+        topLine(g, pts); g.lineTo(SW, STRIP_H); g.lineTo(0, STRIP_H); g.closePath();
+        g.fillStyle = P.far; g.fill();
+        for (let i = 0; i < 7; i++) {
+          const cx = (i + hp(i, 7, 8) * 0.6) * (SW / 7), w = 140 + hp(i, 7, 9) * 160, h = w * (0.38 + hp(i, 7, 10) * 0.18);
+          wrap3(g, cx, x => {
+            const steps = 6;
+            g.fillStyle = P.far;
+            for (let k = 0; k < steps; k++) {
+              const sw = w * (1 - k / steps), sh = h / steps;
+              g.fillRect(x - sw / 2, B - (k + 1) * sh, sw, sh + 1);
+            }
+          });
+        }
+      },
+      mid(g, th, P) {
+        const col = mix(P.mid, '#000000', 0.25), line = rgba(P.lit, 0.3);
+        for (let i = 0; i < 4; i++) {
+          const cx = (i + 0.25 + hp(i, 4, 11) * 0.5) * (SW / 4), w = 300 + hp(i, 4, 12) * 160;
+          const steps = 6 + Math.floor(hp(i, 4, 13) * 3), sh = 22 + hp(i, 4, 14) * 8;
+          wrap3(g, cx, x => {
+            for (let k = 0; k < steps; k++) {
+              const sw = w * (1 - k / (steps + 1.2)), y = B - (k + 1) * sh;
+              g.fillStyle = col; g.fillRect(x - sw / 2, y, sw, sh + 1);
+              g.fillStyle = line; g.fillRect(x - sw / 2, y, sw, 1);
+            }
+            // 가운데 계단
+            const top = B - steps * sh, tw = w * (1 - (steps - 1) / (steps + 1.2));
+            g.fillStyle = mix(col, '#000000', 0.25);
+            g.beginPath(); g.moveTo(x - 16, B); g.lineTo(x - 8, top); g.lineTo(x + 8, top); g.lineTo(x + 16, B); g.closePath(); g.fill();
+            g.fillStyle = rgba(P.lit, 0.1);
+            for (let y = B - 6; y > top; y -= 6) g.fillRect(x - 12 + (B - y) * 0.03, y, 24 - (B - y) * 0.06, 1);
+            // 꼭대기 신전
+            g.fillStyle = col; g.fillRect(x - tw * 0.32, top - 26, tw * 0.64, 26);
+            g.fillStyle = line; g.fillRect(x - tw * 0.32, top - 26, tw * 0.64, 1);
+            g.fillStyle = rgba(P.lit, 0.16); g.fillRect(x - 5, top - 18, 10, 18);
+          });
+        }
+        // 낮은 담장
+        for (let i = 0; i < 16; i++) {
+          const x = i * 128 + hp(i, 16, 15) * 40, w = 50 + hp(i, 16, 16) * 60, h = 10 + hp(i, 16, 17) * 16;
+          g.fillStyle = col; g.fillRect(x, B - h, w, h + 40);
+        }
+        g.fillStyle = col; g.fillRect(0, B - 4, SW, 44);
+      },
+    },
+    gears: {
+      far(g, th, P) {
+        // 톱니 지붕(공장) 스카이라인 + 굴뚝
+        g.fillStyle = P.far;
+        let x = 0, i = 0;
+        while (x < SW) {
+          const w = 80 + hp(i, 64, 20) * 120, h = 50 + hp(i, 64, 21) * 70;
+          const x2 = Math.min(SW, x + w);
+          g.fillRect(x, B - h, x2 - x, h + 40);
+          // 톱니 지붕
+          g.beginPath(); g.moveTo(x, B - h);
+          for (let tx = x; tx < x2 - 1; tx += 24) { g.lineTo(Math.min(x2, tx + 18), B - h - 16); g.lineTo(Math.min(x2, tx + 24), B - h); }
+          g.lineTo(x2, B - h); g.closePath(); g.fill();
+          x = x2; i++;
+        }
+        for (let k = 0; k < 9; k++) {
+          const cx = (k + hp(k, 9, 22)) * (SW / 9), h = 150 + hp(k, 9, 23) * 90, w = 12 + hp(k, 9, 24) * 8;
+          wrap3(g, cx, xx => { g.fillStyle = P.far; g.fillRect(xx - w / 2, B - h, w, h); g.fillRect(xx - w / 2 - 3, B - h, w + 6, 6); });
+        }
+      },
+      mid(g, th, P) {
+        const col = P.mid;
+        // 큰 굴뚝·탱크·건물 블록·파이프
+        for (let i = 0; i < 12; i++) {
+          const x = i * (SW / 12) + hp(i, 12, 30) * 40, w = 90 + hp(i, 12, 31) * 70, h = 40 + hp(i, 12, 32) * 70;
+          wrap3(g, x, xx => {
+            g.fillStyle = col; g.fillRect(xx, B - h, w, h + 40);
+            g.fillStyle = rgba(P.lit, 0.1);
+            for (let wx = xx + 8; wx < xx + w - 14; wx += 18) g.fillRect(wx, B - h + 12, 10, 3);
+            if (hp(i, 12, 33) > 0.5) { // 둥근 탱크
+              const r = 22 + hp(i, 12, 34) * 14;
+              g.fillStyle = col; g.beginPath(); g.arc(xx + w * 0.5, B - h, r, Math.PI, 0); g.fill();
+            }
+          });
+        }
+        for (let k = 0; k < 5; k++) {
+          const cx = (k + 0.3 + hp(k, 5, 35) * 0.4) * (SW / 5), h = 190 + hp(k, 5, 36) * 70, w = 22 + hp(k, 5, 37) * 10;
+          wrap3(g, cx, xx => {
+            g.fillStyle = col;
+            g.beginPath(); g.moveTo(xx - w * 0.65, B); g.lineTo(xx - w / 2, B - h); g.lineTo(xx + w / 2, B - h); g.lineTo(xx + w * 0.65, B); g.closePath(); g.fill();
+            g.fillRect(xx - w / 2 - 4, B - h, w + 8, 7);
+            g.fillStyle = rgba(P.lit, 0.12); g.fillRect(xx - w / 2, B - h + 22, w, 2); g.fillRect(xx - w / 2, B - h + 30, w, 2);
+          });
+        }
+        // 파이프
+        g.strokeStyle = col; g.lineWidth = 6;
+        for (let k = 0; k < 6; k++) {
+          const x = k * (SW / 6) + 60, y = B - 30 - hp(k, 6, 38) * 30;
+          g.beginPath(); g.moveTo(x, B); g.lineTo(x, y); g.lineTo(x + 140, y); g.lineTo(x + 140, B); g.stroke();
+        }
+      },
+    },
+    spires: {
+      far(g, th, P) {
+        for (let i = 0; i < 40; i++) {
+          const cx = (i + hp(i, 40, 40)) * (SW / 40), h = 110 + hp(i, 40, 41) * 190, w = 6 + hp(i, 40, 42) * 12;
+          wrap3(g, cx, x => {
+            g.fillStyle = P.far;
+            g.beginPath(); g.moveTo(x - w / 2, B + 40); g.lineTo(x - w / 2, B - h * 0.75); g.lineTo(x, B - h); g.lineTo(x + w / 2, B - h * 0.75); g.lineTo(x + w / 2, B + 40); g.closePath(); g.fill();
+          });
+        }
+        g.fillStyle = P.far; g.fillRect(0, B - 20, SW, 60);
+      },
+      mid(g, th, P) {
+        const col = P.mid;
+        for (let i = 0; i < 18; i++) {
+          const cx = (i + 0.2 + hp(i, 18, 43) * 0.6) * (SW / 18), w = 20 + hp(i, 18, 44) * 28, h = 90 + hp(i, 18, 45) * 130, tip = 40 + hp(i, 18, 46) * 70;
+          wrap3(g, cx, x => {
+            g.fillStyle = col;
+            g.beginPath(); g.moveTo(x - w / 2 - 6, B + 40); g.lineTo(x - w / 2, B - h); g.lineTo(x, B - h - tip); g.lineTo(x + w / 2, B - h); g.lineTo(x + w / 2 + 6, B + 40); g.closePath(); g.fill();
+            // 가는 띠 장식
+            g.fillStyle = rgba(P.lit, 0.16);
+            for (let y = B - h + 14; y < B - 20; y += 34) g.fillRect(x - w / 2, y, w, 1);
+            // 첨탑 끝 바늘
+            g.fillStyle = col; g.fillRect(x - 0.75, B - h - tip - 22, 1.5, 22);
+            g.fillStyle = rgba(P.lit, 0.5); g.fillRect(x - 1, B - h - tip - 24, 2, 2);
+          });
+        }
+        // 첨탑 사이 다리
+        g.fillStyle = col;
+        for (let i = 0; i < 6; i++) { const x = i * (SW / 6) + hp(i, 6, 47) * 100, y = B - 60 - hp(i, 6, 48) * 60; g.fillRect(x, y, 90 + hp(i, 6, 49) * 60, 4); }
+        g.fillRect(0, B - 10, SW, 50);
+      },
+    },
+    ruins: {
+      far(g, th, P) {
+        for (let i = 0; i < 22; i++) {
+          const cx = (i + hp(i, 22, 50)) * (SW / 22), w = 40 + hp(i, 22, 51) * 60, h = 70 + hp(i, 22, 52) * 160, a = (hp(i, 22, 53) - 0.5) * 0.18;
+          wrap3(g, cx, x => ruin(g, x, w, h, a, P.far, i + 100, null));
+        }
+        g.fillStyle = P.far; g.fillRect(0, B - 12, SW, 52);
+      },
+      mid(g, th, P) {
+        const col = P.mid;
+        for (let i = 0; i < 13; i++) {
+          const cx = (i + 0.2 + hp(i, 13, 54) * 0.6) * (SW / 13), w = 50 + hp(i, 13, 55) * 60, h = 60 + hp(i, 13, 56) * 150, a = (hp(i, 13, 57) - 0.5) * 0.26;
+          wrap3(g, cx, x => ruin(g, x, w, h, a, col, i, P));
+        }
+        // 잔해 더미
+        g.fillStyle = col;
+        for (let i = 0; i < 24; i++) {
+          const x = i * (SW / 24) + hp(i, 24, 58) * 60, r = 14 + hp(i, 24, 59) * 26;
+          wrap3(g, x, xx => { g.beginPath(); g.moveTo(xx - r * 1.6, B + 2); g.lineTo(xx - r * 0.5, B - r * 0.8); g.lineTo(xx + r * 0.3, B - r * 0.6); g.lineTo(xx + r * 1.4, B + 2); g.closePath(); g.fill(); });
+        }
+        g.fillRect(0, B - 2, SW, 42);
+      },
+    },
+  };
+  // 부서진 건물: 기울어진 몸통 + 들쭉날쭉한 윗면 + 빈 창 + 철근
+  function ruin(g, x, w, h, a, col, seed, P) {
+    g.save(); g.translate(x, B + 6); g.rotate(a);
+    g.beginPath(); g.moveTo(-w / 2, 40); g.lineTo(-w / 2, -h * (0.75 + hash(seed + 0.1) * 0.25));
+    const n = 5;
+    for (let k = 1; k < n; k++) g.lineTo(-w / 2 + w * k / n, -h * (0.55 + hash(seed + k * 0.37) * 0.45));
+    g.lineTo(w / 2, -h * (0.6 + hash(seed + 0.9) * 0.4)); g.lineTo(w / 2, 40); g.closePath();
+    g.fillStyle = col; g.fill();
+    if (P) {
+      // 빈 창(불 꺼짐) — 어두운 구멍만
+      g.fillStyle = 'rgba(0,0,0,0.28)';
+      for (let wy = -18; wy > -h * 0.5; wy -= 18) for (let wx = -w / 2 + 7; wx < w / 2 - 10; wx += 13) if (hash(wx * 0.31 + wy * 0.17 + seed) > 0.45) g.fillRect(wx, wy, 6, 9);
+      // 철근
+      g.strokeStyle = rgba(P.fog, 0.9); g.lineWidth = 1.2; g.beginPath();
+      for (let k = 0; k < 3; k++) { const rx = -w / 2 + w * (0.2 + k * 0.3), ry = -h * (0.55 + hash(seed + k * 0.37) * 0.3); g.moveTo(rx, ry); g.lineTo(rx + (hash(seed + k) - 0.5) * 10, ry - 10 - hash(seed + k * 2) * 12); }
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  // ===== 하늘 장식 (캐시 스프라이트) =====
+  function moonSprite(theme, P) {
+    return layer('moon' + P.key, 280, 280, g => {
+      const c = 140, R = 46, pale = mix('#d9fff4', theme.accent, 0.15);
+      const hg = g.createRadialGradient(c, c, R * 0.8, c, c, 138);
+      hg.addColorStop(0, rgba(pale, 0.12)); hg.addColorStop(1, rgba(pale, 0));
+      g.fillStyle = hg; g.fillRect(0, 0, 280, 280);
+      const dg = g.createLinearGradient(0, c - R, 0, c + R);
+      dg.addColorStop(0, mix(pale, P.fog, 0.15)); dg.addColorStop(1, mix(pale, P.fog, 0.45));
+      g.globalAlpha = 0.7; g.fillStyle = dg; g.beginPath(); g.arc(c, c, R, 0, TAU); g.fill();
+      g.globalAlpha = 1; g.fillStyle = rgba(P.fog, 0.18);
+      [[-14, -10, 9], [12, 8, 12], [-6, 20, 6], [18, -18, 5]].forEach(q => { g.beginPath(); g.arc(c + q[0], c + q[1], q[2], 0, TAU); g.fill(); });
+    });
+  }
+  function rustSunSprite(theme, P) {
+    return layer('rsun' + P.key, 460, 460, g => {
+      const c = 230, R = 160, col = mix(mix(theme.accent, '#b8321a', 0.5), P.fog, 0.45);
+      const hg = g.createRadialGradient(c, c, R * 0.9, c, c, 228);
+      hg.addColorStop(0, rgba(col, 0.12)); hg.addColorStop(1, rgba(col, 0));
+      g.fillStyle = hg; g.fillRect(0, 0, 460, 460);
+      const dg = g.createLinearGradient(0, c - R, 0, c + R);
+      dg.addColorStop(0, rgba(col, 0.36)); dg.addColorStop(1, rgba(col, 0.16));
+      g.fillStyle = dg; g.beginPath(); g.arc(c, c, R, 0, TAU); g.fill();
+    });
+  }
+  function crackedSunSprite(theme, P) {
+    return layer('csun' + P.key, 320, 320, g => {
+      const c = 160, R = 74;
+      const top = mix(mix(theme.accent, '#ffffff', 0.25), P.fog, 0.35), bot = mix(theme.accent, theme.bg2, 0.7);
+      const hg = g.createRadialGradient(c, c, R * 0.8, c, c, 158);
+      hg.addColorStop(0, rgba(theme.accent, 0.08)); hg.addColorStop(1, rgba(theme.accent, 0));
+      g.fillStyle = hg; g.fillRect(0, 0, 320, 320);
+      const dg = g.createLinearGradient(0, c - R, 0, c + R);
+      dg.addColorStop(0, top); dg.addColorStop(1, bot);
+      // 금 간 선 (위→아래 지그재그)
+      const crack = [c - 10, c - R - 4, c + 6, c - 40, c - 8, c - 12, c + 12, c + 14, c - 2, c + 44, c + 10, c + R + 4];
+      const half = (side, dx, dy, rot) => {
+        g.save();
+        g.beginPath(); g.moveTo(crack[0], crack[1]);
+        for (let k = 2; k < crack.length; k += 2) g.lineTo(crack[k], crack[k + 1]);
+        g.lineTo(side < 0 ? 0 : 320, 320); g.lineTo(side < 0 ? 0 : 320, 0); g.closePath(); g.clip();
+        g.translate(c + dx, c + dy); g.rotate(rot); g.translate(-c, -c);
+        g.globalAlpha = 0.5; g.fillStyle = dg; g.beginPath(); g.arc(c, c, R, 0, TAU); g.fill();
+        g.globalAlpha = 1; g.fillStyle = rgba(theme.bg2, 0.55);
+        for (let k = 0; k < 5; k++) { const yy = 18 + k * 13; g.fillRect(c - R, c + yy, R * 2, 2 + k * 1.2); }
+        g.restore();
+      };
+      half(-1, 0, 0, 0); half(1, 7, 9, 0.06);
+      // 떨어져 나간 조각
+      g.fillStyle = rgba(top, 0.55);
+      [[c + R + 18, c - 30, 7], [c + R + 34, c - 4, 4], [c + R + 10, c + 20, 3]].forEach(q => { g.beginPath(); g.moveTo(q[0], q[1] - q[2]); g.lineTo(q[0] + q[2], q[1] + q[2] * 0.6); g.lineTo(q[0] - q[2] * 0.8, q[1] + q[2] * 0.4); g.closePath(); g.fill(); });
+    });
+  }
+  function auroraStrip(theme, P) {
+    return layer('aur' + P.key, SW, 260, g => {
+      const bands = [
+        { col: mix(theme.accent2, P.fog, 0.35), y: 120, amp: 38, k: 3, ph: 0.4, len: 90, a: 0.16 },
+        { col: mix(theme.accent, P.fog, 0.25), y: 160, amp: 30, k: 2, ph: 2.1, len: 70, a: 0.13 },
+      ];
+      for (const b of bands) {
+        const lg = g.createLinearGradient(0, -1, 0, 0);
+        lg.addColorStop(0, rgba(b.col, 0)); lg.addColorStop(0.7, rgba(b.col, b.a)); lg.addColorStop(1, rgba(b.col, b.a * 0.3));
+        g.fillStyle = lg;
+        for (let x = 0; x < SW; x += 3) {
+          const u = x / SW * TAU;
+          const yc = b.y + Math.sin(u * b.k + b.ph) * b.amp + Math.sin(u * (b.k * 3 + 1) + b.ph * 2) * b.amp * 0.25;
+          const len = b.len * (0.55 + 0.45 * (0.5 + 0.5 * Math.sin(u * (b.k + 2) + b.ph * 3)));
+          g.save(); g.translate(x, yc); g.scale(1, len); g.fillRect(0, -1, 3, 1); g.restore();
+        }
+      }
+    });
+  }
+  function starStrip(n, seed, h) {
+    return layer('stars' + n + '_' + seed + '_' + h, SW, h, g => {
+      const r = G.mulberry ? G.mulberry(seed) : Math.random;
+      g.fillStyle = '#ffffff';
+      for (let i = 0; i < n; i++) {
+        const x = r() * SW, y = r() * h, big = r() < 0.1;
+        g.globalAlpha = 0.12 + r() * 0.35;
+        g.fillRect(x, y, big ? 2 : 1.3, big ? 2 : 1.3);
+      }
+    });
+  }
+  function gearSprite(r, teeth, P) {
+    return layer('gear' + r + '_' + teeth + P.key, r * 2 + 24, r * 2 + 24, g => {
+      const c = r + 12, ro = r + 10;
+      g.fillStyle = mix(P.far, P.mid, 0.45);
+      g.beginPath();
+      for (let k = 0; k < teeth; k++) {
+        const a0 = k / teeth * TAU, da = TAU / teeth;
+        g.lineTo(c + Math.cos(a0) * r, c + Math.sin(a0) * r);
+        g.lineTo(c + Math.cos(a0 + da * 0.15) * ro, c + Math.sin(a0 + da * 0.15) * ro);
+        g.lineTo(c + Math.cos(a0 + da * 0.45) * ro, c + Math.sin(a0 + da * 0.45) * ro);
+        g.lineTo(c + Math.cos(a0 + da * 0.6) * r, c + Math.sin(a0 + da * 0.6) * r);
+      }
+      g.closePath(); g.fill();
+      // 바퀴살만 남기고 속을 비움
+      g.globalCompositeOperation = 'destination-out';
+      g.beginPath(); g.arc(c, c, r * 0.72, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.save(); g.translate(c, c);
+      for (let k = 0; k < 5; k++) { g.rotate(TAU / 5); g.fillRect(-r * 0.06, 0, r * 0.12, r * 0.74); }
+      g.beginPath(); g.arc(0, 0, r * 0.2, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'destination-out';
+      g.beginPath(); g.arc(0, 0, r * 0.08, 0, TAU); g.fill();
+      g.restore();
+    });
+  }
+  const GEARS = [];
+  for (let i = 0; i < 6; i++) GEARS.push({ x: (i + 0.15 + hash(i * 3.1 + 70) * 0.7) * (SW / 6), r: Math.round(45 + hash(i * 1.7 + 71) * 60), y: 30 + hash(i + 72) * 70, dir: i % 2 ? 1 : -1, teeth: 10 + Math.floor(hash(i + 73) * 8) });
+
+  // ===== 빠른 먼지/입자 층 (시차 0.6, 결정적 움직임, 깜빡임 없음) =====
+  const MOTE_N = 32;
+  const MOTES = [];
+  for (let i = 0; i < MOTE_N; i++) MOTES.push({ x: hash(i * 2.3 + 1), y: hash(i * 5.1 + 2), v: 0.6 + hash(i * 7.7 + 3) * 0.8, ph: hash(i * 9.3 + 4) * TAU, s: hash(i * 3.3 + 5) });
+  function drawMotes(ctx, scene, theme, P, camX, t, oy) {
+    const span = W + 120, top = GROUND_Y - 330, hgt = 360;
+    const wx = x => { let v = x % span; if (v < 0) v += span; return v - 60; };
+    const wy = y => { let v = y % hgt; if (v < 0) v += hgt; return top + v + oy; };
+    const px = camX * 0.6;
+    let col, a;
+    switch (scene) {
+      case 'ziggurat': // 떠오르는 빛 조각
+        col = mix(theme.accent, P.fog, 0.35); ctx.fillStyle = col;
+        for (const m of MOTES) {
+          const y = wy(m.y * hgt - t * 14 * m.v), x = wx(m.x * span - px + Math.sin(t * 0.4 + m.ph) * 8);
+          const f = Math.min(1, (y - top + 10) / 120); // 위로 갈수록 사라짐
+          ctx.globalAlpha = 0.12 * Math.max(0, f); const s = 2 + m.s * 3; ctx.fillRect(x, y, s, s);
+        }
+        break;
+      case 'gears': // 왼쪽 위로 날리는 불씨
+        col = mix(theme.accent, P.fog, 0.3); ctx.fillStyle = col;
+        for (const m of MOTES) {
+          const y = wy(m.y * hgt - t * 26 * m.v + Math.sin(t * 1.3 + m.ph) * 6), x = wx(m.x * span - px - t * 22 * m.v);
+          const f = Math.min(1, (y - top) / 90);
+          ctx.globalAlpha = 0.16 * Math.max(0, f); ctx.fillRect(x, y, 2, 2);
+        }
+        break;
+      case 'spires': // 위로 내리는 비
+        col = mix(theme.accent2, P.fog, 0.4); ctx.fillStyle = col;
+        for (const m of MOTES) {
+          const len = 12 + m.s * 16, y = wy(m.y * hgt - t * (260 + 200 * m.v)), x = wx(m.x * span - px);
+          ctx.globalAlpha = 0.1 + 0.05 * m.s; ctx.fillRect(x, y, 1, len);
+        }
+        break;
+      case 'ruins': { // 재 + 아지랑이 띠
+        col = mix('#b9a9b8', P.fog, 0.35); ctx.fillStyle = col;
+        for (const m of MOTES) {
+          const y = wy(m.y * hgt + t * 12 * m.v), x = wx(m.x * span - px + Math.sin(t * 0.7 + m.ph) * 14 - t * 6);
+          ctx.globalAlpha = 0.12; const s = 1.5 + m.s * 1.8; ctx.fillRect(x, y, s, s * 0.7);
+        }
+        ctx.fillStyle = mix(theme.accent, P.fog, 0.5);
+        for (let k = 0; k < 3; k++) {
+          const y = GROUND_Y - 40 - k * 46 + Math.sin(t * 0.5 + k * 2) * 6 + oy;
+          ctx.globalAlpha = 0.03; ctx.fillRect(-40, y, W + 80, 3 + k);
+        }
+        break;
+      }
+      default: // 떠다니는 먼지
+        col = mix(theme.accent, P.fog, 0.45); ctx.fillStyle = col;
+        for (const m of MOTES) {
+          const y = wy(m.y * hgt + Math.sin(t * 0.5 + m.ph) * 10), x = wx(m.x * span - px - t * 8 * m.v);
+          ctx.globalAlpha = 0.1; const s = 1.5 + m.s * 1.5; ctx.fillRect(x, y, s, s);
+        }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // 박자 반응: 순간적으로 튀지 않게 부드럽게 따라가는 값(밝기 변화 5% 미만으로만 사용)
+  let amb = 0, barAmb = 0, ambT = 0;
+  const STAR_N = { city: 90, ziggurat: 70, gears: 24, spires: 80, ruins: 36 };
+
   function drawBackground(ctx, theme, camX, camY, t, bt) {
-    const pulse = bt.pulse;
+    const dt = Math.max(0, Math.min(0.1, t - ambT)); ambT = t;
+    amb += (bt.pulse - amb) * Math.min(1, dt * 6);
+    barAmb += (bt.barPulse - barAmb) * Math.min(1, dt * 1.5);
+    const scene = SCENES[theme.scene] ? theme.scene : 'city';
+    const S = SCENES[scene];
+    const P = palette(theme);
     // 하늘
     const sky = cachedGrad(ctx, 'sky' + theme.bg + theme.bg2 + GROUND_Y, () => {
       const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
@@ -243,81 +683,110 @@
     });
     ctx.fillStyle = sky;
     ctx.fillRect(-40, -40, W + 80, H + 80);
-    // 박자 배경 맥동
-    // (화면 전체 박자 번쩍임은 눈이 피로해서 제거 — 박자는 지평선 빛으로만)
+    // (화면 전체 박자 번쩍임은 눈이 피로해서 제거 — 박자는 지평선 빛으로만, 아주 약하게)
     const oy = camY * 0.15;
-    // 별
+    // 별(캐시 띠) + 밝은 별 몇 개만 천천히 반짝
+    const sh = Math.max(60, Math.round(GROUND_Y - 90));
+    drawStrip(ctx, starStrip(STAR_N[scene], 777 + scene.length, sh), 0.03, camX, oy * 0.5);
     ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < STARS.length; i++) {
+    for (let i = 0; i < 8; i++) {
       const s = STARS[i];
-      let x = (s.x - camX * 0.03 * s.d) % (W + 40); if (x < -20) x += W + 40;
-      const a = 0.35 + 0.45 * Math.sin(t * 2 * s.d + s.ph) + 0.2 * pulse;
-      ctx.globalAlpha = Math.max(0.05, Math.min(1, a));
-      ctx.fillRect(x, s.y * (GROUND_Y - 100) + oy * 0.5, s.s, s.s);
+      let x = (s.x - camX * 0.03) % (W + 40); if (x < -20) x += W + 40;
+      ctx.globalAlpha = 0.35 + 0.2 * Math.sin(t * 0.8 * s.d + s.ph);
+      ctx.fillRect(x, s.y * (GROUND_Y - 120) + oy * 0.5, 2, 2);
     }
     ctx.globalAlpha = 1;
-    // 레트로 태양 (지면 기준 높이 → 화면 비율이 바뀌어도 지평선에 걸침)
-    const sunX = W * 0.72, sunY = GROUND_Y - 180 + oy * 0.4, sunR = 105 + pulse * 3;
-    glow(ctx, sunX, sunY, 5.2, theme.accent2, 0.35 + 0.25 * pulse);
-    const sg = cachedGrad(ctx, 'sun' + theme.accent + theme.accent2, () => {
-      const g = ctx.createLinearGradient(0, -110, 0, 110);
-      g.addColorStop(0, '#fff3a8'); g.addColorStop(0.45, theme.accent2); g.addColorStop(1, mix(theme.accent2, theme.bg2, 0.6));
-      return g;
-    });
-    ctx.save(); ctx.translate(sunX, sunY);
-    ctx.fillStyle = sg; ctx.globalAlpha = 0.85;
-    ctx.beginPath(); ctx.arc(0, 0, sunR, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = theme.bg2;
-    for (let k = 0; k < 7; k++) {
-      const yy = 10 + k * 14 + ((t * 12) % 14), hh = 2 + k * 1.3;
-      if (yy < sunR) ctx.fillRect(-sunR, yy, sunR * 2, hh);
+    // 하늘 장식
+    const spr = (c, x, y, k) => { if (c) { const w = c.lw * k, h = c.lh * k; ctx.drawImage(c, x - w / 2, y - h / 2, w, h); } };
+    if (scene === 'city') {
+      // 레트로 태양 (지면 기준 높이 → 화면 비율이 바뀌어도 지평선에 걸침)
+      const sunX = W * 0.72, sunY = GROUND_Y - 180 + oy * 0.4, sunR = 105 + amb * 2;
+      glow(ctx, sunX, sunY, 5.2, theme.accent2, 0.3 + 0.04 * amb);
+      const sg = cachedGrad(ctx, 'sun' + theme.accent + theme.accent2, () => {
+        const g = ctx.createLinearGradient(0, -110, 0, 110);
+        g.addColorStop(0, '#fff3a8'); g.addColorStop(0.45, theme.accent2); g.addColorStop(1, mix(theme.accent2, theme.bg2, 0.6));
+        return g;
+      });
+      ctx.save(); ctx.translate(sunX, sunY);
+      ctx.fillStyle = sg; ctx.globalAlpha = 0.75;
+      ctx.beginPath(); ctx.arc(0, 0, sunR, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(0, 0, sunR + 1, 0, TAU); ctx.clip();
+      ctx.fillStyle = mix(theme.bg2, theme.bg, 0.3);
+      for (let k = 0; k < 7; k++) {
+        const yy = 10 + k * 14 + ((t * 12) % 14), hh = 2 + k * 1.3;
+        if (yy < sunR) ctx.fillRect(-sunR, yy, sunR * 2, hh);
+      }
+      ctx.restore();
+    } else if (scene === 'ziggurat') {
+      spr(moonSprite(theme, P), W * 0.7, GROUND_Y - 280 + oy * 0.4, 1 + amb * 0.02);
+    } else if (scene === 'gears') {
+      spr(rustSunSprite(theme, P), W * 0.6, GROUND_Y - 70 + oy * 0.4, 1);
+      // 불씨 안개(지평선 쪽 따뜻한 연무)
+      const eg = cachedGrad(ctx, 'ember' + P.key, () => {
+        const g = ctx.createLinearGradient(0, -260, 0, 0);
+        g.addColorStop(0, rgba(theme.accent, 0)); g.addColorStop(1, rgba(mix(theme.accent, P.fog, 0.5), 0.12));
+        return g;
+      });
+      ctx.save(); ctx.translate(0, GROUND_Y + oy); ctx.fillStyle = eg; ctx.fillRect(-40, -260, W + 80, 260); ctx.restore();
+    } else if (scene === 'spires') {
+      const c = auroraStrip(theme, P);
+      if (c) drawStrip(ctx, c, 0.02, camX + t * 60, GROUND_Y - 430 + oy * 0.3);
+    } else if (scene === 'ruins') {
+      spr(crackedSunSprite(theme, P), W * 0.68, GROUND_Y - 260 + oy * 0.4, 1 + amb * 0.02);
+      // 지평선의 붉은 '코어' 빛: 마디(4박)마다 천천히 숨쉼
+      const cg = cachedGrad(ctx, 'core' + P.key, () => {
+        const g = ctx.createLinearGradient(0, -170, 0, 0);
+        g.addColorStop(0, rgba(theme.accent, 0)); g.addColorStop(1, rgba(mix(theme.accent, theme.bg2, 0.45), 0.22));
+        return g;
+      });
+      ctx.save(); ctx.translate(0, GROUND_Y + oy); ctx.globalAlpha = 0.8 + 0.2 * barAmb;
+      ctx.fillStyle = cg; ctx.fillRect(-40, -170, W + 80, 170); ctx.restore(); ctx.globalAlpha = 1;
     }
-    ctx.restore();
-    // 먼 산
-    const mcol = mix(theme.bg2, theme.bg, 0.4);
-    const mx = camX * 0.08;
-    ctx.beginPath(); ctx.moveTo(-40, GROUND_Y + 40);
-    for (let x = -40; x <= W + 40; x += 30) {
-      const n = noise((x + mx) / 160) * 0.7 + noise((x + mx) / 55) * 0.3;
-      ctx.lineTo(x, GROUND_Y - 40 - n * 150 + oy);
-    }
-    ctx.lineTo(W + 40, GROUND_Y + 40); ctx.closePath();
-    ctx.fillStyle = mcol; ctx.fill();
-    ctx.strokeStyle = rgba(theme.accent2, 0.25 + 0.08 * pulse); ctx.lineWidth = 2; ctx.stroke();
-    // 도시 실루엣
-    const cx = camX * 0.28, cell = 64;
-    const first = Math.floor((cx - 40) / cell), last = Math.floor((cx + W + 40) / cell);
-    const ccol = mix(theme.bg, '#000000', 0.45);
-    for (let i = first; i <= last; i++) {
-      const h1 = hash(i * 1.37);
-      if (h1 < 0.18) continue;
-      const bw = 34 + hash(i + 0.3) * 26, bh = 40 + hash(i + 0.7) * 150;
-      const bx = i * cell - cx, by = GROUND_Y - bh + oy * 1.6;
-      ctx.fillStyle = ccol; ctx.fillRect(bx, by, bw, bh + 60);
-      ctx.fillStyle = rgba(theme.accent, 0.22 + 0.08 * pulse); ctx.fillRect(bx, by, bw, 2);
-      // 창문
-      const lit = rgba(mix(theme.accent, theme.bg2, 0.35), 0.16);
-      ctx.fillStyle = lit;
-      for (let wy = by + 10; wy < GROUND_Y - 8; wy += 14) {
-        for (let wx = bx + 6; wx < bx + bw - 6; wx += 10) {
-          if (hash(wx * 0.13 + wy * 0.71 + i) > 0.62) ctx.fillRect(wx, wy, 4, 6);
-        }
+    // 먼 층
+    const stripY = k => GROUND_Y - STRIP_BASE + oy * k;
+    const far = layer('far' + scene + P.key, SW, STRIP_H, g => S.far(g, theme, P));
+    drawStrip(ctx, far, 0.08, camX, stripY(1));
+    // 3: 천천히 도는 톱니바퀴 (시차 0.12)
+    if (scene === 'gears') {
+      const gx = camX * 0.12;
+      for (let i = 0; i < GEARS.length; i++) {
+        const q = GEARS[i], c = gearSprite(q.r, q.teeth, P);
+        if (!c) continue;
+        let x = (q.x - gx) % SW; if (x < -q.r - 20) x += SW;
+        if (x > W + q.r + 20) continue;
+        ctx.save(); ctx.translate(x, GROUND_Y - q.y + oy * 1.2); ctx.rotate(t * 0.12 * q.dir + i);
+        ctx.drawImage(c, -c.lw / 2, -c.lh / 2, c.lw, c.lh); ctx.restore();
       }
     }
-    // 지평선 글로우
+    // 가까운 층
+    const mid = layer('mid' + scene + P.key, SW, STRIP_H, g => S.mid(g, theme, P));
+    drawStrip(ctx, mid, 0.28, camX, stripY(1.6));
+    // 띠 아래(카메라가 높이 올라갔을 때) 빈틈 메움
+    const below = stripY(1.6) + STRIP_H;
+    if (below < H + 40) { ctx.fillStyle = P.mid; ctx.fillRect(-40, below - 1, W + 80, H + 41 - below); }
+    // 지평선 안개: 스카이라인 아래쪽을 안개색으로 덮어서 지면과 분리
+    const hz = cachedGrad(ctx, 'haze' + P.fog, () => {
+      const g = ctx.createLinearGradient(0, -140, 0, 0);
+      g.addColorStop(0, rgba(P.fog, 0)); g.addColorStop(1, rgba(P.fog, 0.4));
+      return g;
+    });
+    ctx.save(); ctx.translate(0, GROUND_Y + camY);
+    ctx.fillStyle = hz; ctx.fillRect(-40, -140, W + 80, 140);
+    // 지평선 글로우 (박자에 아주 약하게)
     ctx.globalCompositeOperation = 'lighter';
     const hg = cachedGrad(ctx, 'hz' + theme.accent, () => {
       const g = ctx.createLinearGradient(0, -120, 0, 0);
       g.addColorStop(0, rgba(theme.accent, 0)); g.addColorStop(1, rgba(theme.accent, 0.35));
       return g;
     });
-    ctx.globalAlpha = 0.4 + 0.25 * pulse;
-    ctx.save(); ctx.translate(0, GROUND_Y + camY);
+    ctx.globalAlpha = 0.3 + 0.06 * amb;
     ctx.fillStyle = hg; ctx.fillRect(-40, -120, W + 80, 120);
     ctx.restore();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    // 빠른 입자 층
+    drawMotes(ctx, scene, theme, P, camX, t, oy);
   }
 
   // ===== 바닥 =====
@@ -687,7 +1156,13 @@
     }
     drawBackground(ctx, theme, cam.x, cam.y, t, bt);
     // 배경을 살짝 눌러서 장애물·먹이가 배경 불빛과 섞이지 않게
-    ctx.fillStyle = 'rgba(2,3,10,0.38)'; ctx.fillRect(-20, -20, W + 40, H + 40);
+    // (배경 쪽에서 안개로 대비를 낮췄으므로 덮개는 옅게: 위쪽 하늘은 덜, 플레이 띠는 조금 더)
+    ctx.fillStyle = cachedGrad(ctx, 'dim' + GROUND_Y, () => {
+      const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+      g.addColorStop(0, 'rgba(2,3,10,0.16)'); g.addColorStop(0.55, 'rgba(2,3,10,0.26)'); g.addColorStop(1, 'rgba(2,3,10,0.3)');
+      return g;
+    });
+    ctx.fillRect(-20, -20, W + 40, H + 40);
     ctx.save();
     ctx.translate(-cam.x, GROUND_Y + cam.y);
     const x0 = cam.x - 120, x1 = cam.x + W + 120;
