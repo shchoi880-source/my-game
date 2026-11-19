@@ -12,12 +12,15 @@ window.G = window.G || {};
   const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
   G.canvas = canvas; G.ctx = ctx;
   G.scale = 1; G.dpr = 1; G.ox = 0; G.oy = 0;
+  // 터치가 주 입력인 기기(폰·태블릿)인지: PC(마우스)는 창이 세로여도 회전 안내를 띄우지 않음
+  const mq = q => { try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; } };
+  G.isTouch = () => mq('(pointer: coarse)') || (!mq('(pointer: fine)') && (navigator.maxTouchPoints || 0) > 0);
   G.resize = () => {
     if (!canvas) return;
     G.dpr = Math.min(window.devicePixelRatio || 1, 2);
     const vw = window.innerWidth, vh = window.innerHeight;
     G.scale = Math.min(vw / W, vh / H);
-    G.portrait = vh > vw * 1.05;
+    G.portrait = G.isTouch() && vh > vw * 1.05;
     canvas.style.width = Math.floor(W * G.scale) + 'px';
     canvas.style.height = Math.floor(H * G.scale) + 'px';
     canvas.width = Math.floor(W * G.scale * G.dpr);
