@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#2a1660"/>
+      <stop offset="0.45" stop-color="#140f3a"/>
+      <stop offset="1" stop-color="#04060f"/>
+    </radialGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d2a4a"/>
+      <stop offset="1" stop-color="#04060f"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b6ffe4"/>
+      <stop offset="0.45" stop-color="#3dffb0"/>
+      <stop offset="1" stop-color="#12b97e"/>
+    </linearGradient>
+    <linearGradient id="spike" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb3fa"/>
+      <stop offset="0.35" stop-color="#ff3df2"/>
+      <stop offset="1" stop-color="#8a12a8"/>
+    </linearGradient>
+    <radialGradient id="halo"><stop offset="0.45" stop-color="#3dffb0" stop-opacity="0.35"/><stop offset="1" stop-color="#3dffb0" stop-opacity="0"/></radialGradient>
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bigglow" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- speed lines -->
+  <g stroke-linecap="round" opacity="0.55">
+    <line x1="120" y1="300" x2="300" y2="300" stroke="#29f0ff" stroke-width="10"/>
+    <line x1="80" y1="380" x2="200" y2="380" stroke="#ff3df2" stroke-width="8"/>
+    <line x1="820" y1="230" x2="940" y2="230" stroke="#29f0ff" stroke-width="8" opacity="0.6"/>
+  </g>
+  <!-- floor -->
+  <rect x="0" y="770" width="1024" height="254" fill="url(#floor)"/>
+  <g stroke="#29f0ff" stroke-width="4" opacity="0.25">
+    <line x1="512" y1="770" x2="512" y2="1024"/>
+    <line x1="380" y1="770" x2="250" y2="1024"/>
+    <line x1="644" y1="770" x2="774" y2="1024"/>
+    <line x1="250" y1="770" x2="-20" y2="1024"/>
+    <line x1="774" y1="770" x2="1044" y2="1024"/>
+    <line x1="0" y1="850" x2="1024" y2="850"/>
+    <line x1="0" y1="950" x2="1024" y2="950"/>
+  </g>
+  <!-- spike -->
+  <ellipse cx="450" cy="740" rx="130" ry="70" fill="#ff3df2" opacity="0.45" filter="url(#bigglow)"/>
+  <path d="M355 770 L450 600 L545 770 Z" fill="url(#spike)" stroke="#ff9cf7" stroke-width="10" stroke-linejoin="round" filter="url(#glow)"/>
+  <!-- ground line -->
+  <rect x="0" y="750" width="1024" height="40" fill="#29f0ff" opacity="0.5" filter="url(#bigglow)"/>
+  <line x1="0" y1="770" x2="1024" y2="770" stroke="#29f0ff" stroke-width="14" filter="url(#glow)"/>
+  <line x1="0" y1="770" x2="1024" y2="770" stroke="#d8fdff" stroke-width="4"/>
+  <!-- trail -->
+  <g filter="url(#glow)"><g fill="#3dffb0" stroke="#b6ffe4" stroke-width="5">
+    <rect x="-30" y="-30" width="60" height="60" rx="12" transform="translate(195 655) rotate(-10)" opacity="0.3"/>
+    <rect x="-42" y="-42" width="84" height="84" rx="16" transform="translate(262 572) rotate(0)" opacity="0.5"/>
+    <rect x="-55" y="-55" width="110" height="110" rx="20" transform="translate(340 492) rotate(10)" opacity="0.72"/>
+  </g></g>
+  <!-- cube -->
+  <circle cx="600" cy="380" r="330" fill="url(#halo)"/>
+  <g filter="url(#glow)"><rect x="-185" y="-185" width="370" height="370" rx="65" fill="none" stroke="#3dffb0" stroke-width="22" transform="translate(600 380) rotate(20)"/></g>
+  <g transform="translate(600 380) rotate(20) scale(10.88)">
+    <rect x="-17" y="-17" width="34" height="34" rx="6" fill="url(#body)" stroke="#e6fff6" stroke-width="1.4"/>
+    <rect x="-10" y="-9" width="8" height="11" rx="3.2" fill="#fff"/>
+    <rect x="3" y="-9" width="8" height="11" rx="3.2" fill="#fff"/>
+    <circle cx="-4.6" cy="-3" r="2.6" fill="#0a1a2a"/>
+    <circle cx="8.4" cy="-3" r="2.6" fill="#0a1a2a"/>
+    <circle cx="-3.8" cy="-4" r="0.9" fill="#fff"/>
+    <circle cx="9.2" cy="-4" r="0.9" fill="#fff"/>
+    <ellipse cx="-11" cy="6.5" rx="2.8" ry="1.6" fill="#ff6fc6" opacity="0.75"/>
+    <ellipse cx="12" cy="6.5" rx="2.8" ry="1.6" fill="#ff6fc6" opacity="0.75"/>
+    <path d="M-2 6.5 Q1.5 10.5 5 6.5" fill="none" stroke="#0a1a2a" stroke-width="1.7" stroke-linecap="round"/>
+  </g>
+</svg>
