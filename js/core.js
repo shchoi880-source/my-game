@@ -20,8 +20,11 @@ window.G = window.G || {};
   G.isTouch = () => mq('(pointer: coarse)') || (!mq('(pointer: fine)') && (navigator.maxTouchPoints || 0) > 0);
   G.resize = () => {
     if (!canvas) return;
-    const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
-    G.portrait = G.isTouch() && vh > vw * 1.05;
+    let vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
+    // 폰을 세로로 들고 있으면 '돌려주세요' 대신 캔버스를 90° 돌려서 바로 가로 화면으로 보여줌
+    G.portrait = false;
+    G.rotated = G.isTouch() && vh > vw * 1.05;
+    if (G.rotated) { const t = vw; vw = vh; vh = t; }
     // 1) 화면 비율에 맞춰 논리 크기 결정 → 폰마다 검은 띠 없이 꽉 채움
     //    길쭉한 폰(19.5:9 등): 높이 540 고정, 가로를 넓힘(앞이 더 보임)
     //    태블릿(4:3 등): 가로 960 고정, 세로를 늘림(하늘이 더 보임)
@@ -37,6 +40,7 @@ window.G = window.G || {};
     if (cssW * cssH * dpr * dpr > maxPx) dpr = Math.sqrt(maxPx / (cssW * cssH));
     canvas.style.width = cssW + 'px';
     canvas.style.height = cssH + 'px';
+    canvas.style.transform = 'translate(-50%,-50%)' + (G.rotated ? ' rotate(90deg)' : '');
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     G.scale = cssW / w;
@@ -48,6 +52,7 @@ window.G = window.G || {};
     window.addEventListener('resize', G.resize);
     // 일부 iOS에서는 회전 직후 resize 시점에 innerWidth/Height가 아직 옛 값 → 잠시 뒤 한 번 더
     window.addEventListener('orientationchange', () => setTimeout(G.resize, 300));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', G.resize);
     G.resize();
   }
 

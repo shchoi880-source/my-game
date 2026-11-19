@@ -28,6 +28,8 @@
   // ===== 입력 =====
   const toLogical = e => {
     const r = G.canvas.getBoundingClientRect();
+    // 90° 돌려 그린 경우: 화면 아래쪽 = 논리 x+, 화면 왼쪽 = 논리 y+
+    if (G.rotated) return { x: (e.clientY - r.top) / r.height * G.W, y: (r.right - e.clientX) / r.width * G.H };
     return { x: (e.clientX - r.left) / r.width * G.W, y: (e.clientY - r.top) / r.height * G.H };
   };
   let audioReady = false;
@@ -45,8 +47,20 @@
   // 터치 기기에서는 pointerdown/touchstart 가 '사용자 활성화'가 아니라서(Chrome Android·iOS Safari)
   // AudioContext.resume()이 거부된다 → 손을 뗄 때(pointerup/touchend)도 오디오를 깨운다.
   G.canvas.addEventListener('touchend', wakeAudio, { passive: true });
+  // 안드로이드 등: 첫 터치 때 전체화면 + 가로 고정 시도(iPhone은 미지원 → 위의 90° 회전으로 처리)
+  let lockTried = false;
+  const tryLandscape = () => {
+    if (lockTried || !G.isTouch()) return;
+    lockTried = true;
+    const so = screen.orientation;
+    if (!so || !so.lock) return;
+    const de = document.documentElement;
+    const lock = () => so.lock('landscape').catch(() => {});
+    if (document.fullscreenElement || !de.requestFullscreen) lock();
+    else de.requestFullscreen({ navigationUI: 'hide' }).then(lock, () => {});
+  };
   window.addEventListener('pointerup', e => {
-    if (e.pointerType !== 'mouse') wakeAudio();
+    if (e.pointerType !== 'mouse') { wakeAudio(); tryLandscape(); }
     const p = toLogical(e);
     if (scene && scene.up) scene.up(p.x, p.y, e);
   });
