@@ -1,15 +1,19 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = 'mdef-' + VERSION;
+const SFX = ['shoot_pistol', 'shoot_smg', 'shoot_rifle', 'shoot_shotgun', 'hit', 'kill', 'kill2', 'explode', 'explode2', 'bigboom', 'crate', 'hurt', 'slam', 'shield', 'laser', 'fire', 'good', 'bad', 'click', 'back', 'open', 'confirm', 'error', 'coin', 'select', 'metal'];
 const ASSETS = [
   './',
   './index.html',
-  './game.js',
   './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-];
+  './js/core.js', './js/data.js', './js/audio.js', './js/battle.js', './js/ui.js', './js/main.js',
+  './assets/main.png', './assets/main.json',
+  './assets/monsters.png', './assets/monsters.json',
+  './assets/fx.png', './assets/fx.json',
+  './assets/kenney-future.ttf',
+  './icons/icon-192.png', './icons/icon-512.png',
+].concat(SFX.map(n => './assets/sfx/' + n + '.ogg'));
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
