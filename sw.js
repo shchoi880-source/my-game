@@ -1,17 +1,12 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'v5';
-const CACHE = 'mdef-' + VERSION;
-const SFX = ['shoot_pistol', 'shoot_smg', 'shoot_rifle', 'shoot_shotgun', 'hit', 'kill', 'kill2', 'explode', 'explode2', 'bigboom', 'crate', 'hurt', 'slam', 'shield', 'laser', 'fire', 'good', 'bad', 'click', 'back', 'open', 'confirm', 'error', 'coin', 'select', 'metal'];
+const VERSION = 'nd-1';
+const CACHE = 'neondash-' + VERSION;
+const SFX = ['back', 'bigboom', 'book', 'chop', 'click', 'coin', 'confirm', 'door', 'draw', 'equip', 'error', 'explode', 'fire', 'gold', 'hit', 'hurt', 'kill', 'laser', 'latch', 'open', 'page', 'potion', 'shield', 'slash', 'slash2', 'step'];
 const ASSETS = [
-  './',
-  './index.html',
-  './manifest.webmanifest',
-  './js/core.js', './js/data.js', './js/audio.js', './js/battle.js', './js/ui.js', './js/main.js',
-  './assets/main.png', './assets/main.json',
-  './assets/monsters.png', './assets/monsters.json',
-  './assets/fx.png', './assets/fx.json',
-  './assets/kenney-future.ttf',
+  './', './index.html', './manifest.webmanifest',
+  './js/core.js', './js/audio.js', './js/levels.js', './js/engine.js', './js/render.js', './js/screens.js', './js/main.js',
+  './assets/fx.png', './assets/fx.json', './assets/kenney-future.ttf',
   './icons/icon-192.png', './icons/icon-512.png',
 ].concat(SFX.map(n => './assets/sfx/' + n + '.ogg'));
 
@@ -22,7 +17,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('mdef-') && k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

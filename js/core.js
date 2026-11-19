@@ -1,52 +1,56 @@
 'use strict';
-// 공통: 캔버스, 유틸, 저장, 에셋(아틀라스) 로더, 스프라이트 그리기
-window.MD = window.MD || {};
+// 공통: 캔버스, 유틸, 그리기, 글로우 스프라이트, 저장 (docs/SPEC.md §3)
+window.G = window.G || {};
 (() => {
-  const MD = window.MD;
-  const W = 420, H = 760, TAU = Math.PI * 2;
-  MD.W = W; MD.H = H; MD.TAU = TAU;
-  MD.FONT = '"KenneyFuture","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif';
+  const G = window.G;
+  const W = 960, H = 540, TAU = Math.PI * 2;
+  G.W = W; G.H = H; G.TAU = TAU;
+  G.FONT = '"KenneyFuture","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif';
 
   // ===== 캔버스 =====
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  MD.canvas = canvas; MD.ctx = ctx;
-  MD.scale = 1; MD.dpr = 1;
-  MD.resize = () => {
-    MD.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    MD.scale = Math.min(window.innerWidth / W, window.innerHeight / H);
-    canvas.style.width = Math.floor(W * MD.scale) + 'px';
-    canvas.style.height = Math.floor(H * MD.scale) + 'px';
-    canvas.width = Math.floor(W * MD.scale * MD.dpr);
-    canvas.height = Math.floor(H * MD.scale * MD.dpr);
+  const canvas = typeof document !== 'undefined' && document.getElementById ? document.getElementById('game') : null;
+  const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+  G.canvas = canvas; G.ctx = ctx;
+  G.scale = 1; G.dpr = 1; G.ox = 0; G.oy = 0;
+  G.resize = () => {
+    if (!canvas) return;
+    G.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    G.scale = Math.min(vw / W, vh / H);
+    G.portrait = vh > vw * 1.05;
+    canvas.style.width = Math.floor(W * G.scale) + 'px';
+    canvas.style.height = Math.floor(H * G.scale) + 'px';
+    canvas.width = Math.floor(W * G.scale * G.dpr);
+    canvas.height = Math.floor(H * G.scale * G.dpr);
   };
-  window.addEventListener('resize', MD.resize);
-  MD.resize();
+  if (canvas) {
+    window.addEventListener('resize', G.resize);
+    // 일부 iOS에서는 회전 직후 resize 시점에 innerWidth/Height가 아직 옛 값 → 잠시 뒤 한 번 더
+    window.addEventListener('orientationchange', () => setTimeout(G.resize, 300));
+    G.resize();
+  }
 
   // ===== 유틸 =====
-  MD.rand = (a, b) => a + Math.random() * (b - a);
-  MD.randi = (a, b) => Math.floor(MD.rand(a, b + 1));
-  MD.pick = arr => arr[Math.floor(Math.random() * arr.length)];
-  MD.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  MD.lerp = (a, b, t) => a + (b - a) * t;
-  MD.easeOutBack = t => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
-  MD.easeOutCubic = t => 1 - Math.pow(1 - t, 3);
-  MD.today = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
-  MD.dayDiff = (a, b) => {
-    const p = s => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
-    return Math.round((p(b) - p(a)) / 86400000);
+  G.rand = (a, b) => a + Math.random() * (b - a);
+  G.randi = (a, b) => Math.floor(G.rand(a, b + 1));
+  G.pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  G.clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  G.lerp = (a, b, t) => a + (b - a) * t;
+  G.easeOutBack = t => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+  G.easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  G.mulberry = seed => {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   };
 
-  MD.fmt = n => {
-    n = Math.floor(n);
-    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
-    if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
-    if (n >= 1e4) return (n / 1e3).toFixed(n >= 1e5 ? 0 : 1) + 'K';
-    return String(n);
-  };
-
-  MD.rr = (x, y, w, h, r) => {
+  // ===== 그리기 =====
+  G.rr = (x, y, w, h, r) => {
     r = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -56,114 +60,36 @@ window.MD = window.MD || {};
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   };
-  MD.circle = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, TAU); };
-
-  MD.text = (str, x, y, size, color, o) => {
+  G.circle = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, TAU); };
+  G.text = (str, x, y, size, color, o) => {
     o = o || {};
-    ctx.font = `${o.weight || 900} ${size}px ${MD.FONT}`;
+    ctx.font = `${o.weight || 900} ${size}px ${G.FONT}`;
     ctx.textAlign = o.align || 'center';
     ctx.textBaseline = 'middle';
     let s = String(str).replace(/%/g, '％');
     if (o.maxW) {
       while (s.length > 1 && ctx.measureText(s).width > o.maxW) s = s.slice(0, -1);
-      if (s !== String(str)) s = s.slice(0, -1) + '…';
     }
     if (o.stroke) {
       ctx.lineJoin = 'round';
       ctx.lineWidth = o.stroke;
-      ctx.strokeStyle = o.strokeColor || 'rgba(0,0,0,0.65)';
+      ctx.strokeStyle = o.strokeColor || 'rgba(0,0,0,0.7)';
       ctx.strokeText(s, x, y);
     }
     ctx.fillStyle = color;
     ctx.fillText(s, x, y);
   };
-  MD.textW = (str, size, weight) => { ctx.font = `${weight || 900} ${size}px ${MD.FONT}`; return ctx.measureText(String(str)).width; };
+  G.textW = (str, size, weight) => { ctx.font = `${weight || 900} ${size}px ${G.FONT}`; return ctx.measureText(String(str)).width; };
 
-  // 여러 줄 텍스트 (글자 단위 줄바꿈, 한글 대응)
-  MD.wrapText = (str, x, y, maxW, size, color, lineH, o) => {
-    o = o || {};
-    ctx.font = `${o.weight || 700} ${size}px ${MD.FONT}`;
-    const lines = [];
-    for (const para of String(str).split('\n')) {
-      let line = '';
-      for (const ch of para) {
-        if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
-        else line += ch;
-      }
-      lines.push(line);
-    }
-    lines.forEach((l, i) => MD.text(l, x, y + i * (lineH || size * 1.35), size, color, Object.assign({ weight: 700 }, o)));
-    return lines.length;
+  // ===== 글로우 스프라이트 (assets/fx.png) =====
+  const frames = {};
+  const tintCache = {};
+  G.loadFx = async () => {
+    const json = await fetch('assets/fx.json').then(r => r.json());
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = 'assets/fx.png'; });
+    for (const k of Object.keys(json.frames)) { const f = json.frames[k]; frames[k] = { img, x: f[0], y: f[1], w: f[2], h: f[3] }; }
   };
-
-  // ===== 저장 =====
-  const DEFAULT = () => ({
-    v: 3, coins: 0, sfx: true, music: true,
-    stars: {}, unlocked: 0, best: {},
-    hero: 'soldier', heroes: { soldier: { lv: 1 } },
-    weapon: 'pistol', weapons: { pistol: { lv: 1 } },
-    up: { troops: 0, power: 0, bonus: 0, charge: 0 },
-    stats: { kills: 0, bosses: 0, gatesX: 0, maxTroops: 0, clears: 0, crates: 0, skills: 0, perfect: 0 },
-    daily: { last: '', day: 0 },
-    missions: { date: '', list: [] },
-    ach: {},
-    tut: { move: false, gate: false, skill: false, crate: false },
-  });
-  function deepMerge(dst, src) {
-    for (const k of Object.keys(src)) {
-      const v = src[k];
-      if (v && typeof v === 'object' && !Array.isArray(v) && dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) deepMerge(dst[k], v);
-      else dst[k] = v;
-    }
-    return dst;
-  }
-  function loadSave() {
-    const s = DEFAULT();
-    try {
-      const raw = JSON.parse(localStorage.getItem('mdef-save') || 'null');
-      if (raw && typeof raw === 'object') {
-        if (raw.v === 3) deepMerge(s, raw);
-        else {
-          // v2 저장 이전: 코인과 강화만 가져옴
-          s.coins = Math.floor(raw.coins || 0);
-          if (raw.up) { s.up.troops = raw.up.troops || 0; s.up.power = raw.up.power || 0; s.up.bonus = raw.up.bonus || 0; }
-          s.sfx = !raw.muted;
-        }
-      }
-    } catch (e) { /* 저장소 사용 불가 */ }
-    return s;
-  }
-  MD.save = loadSave();
-  MD.persist = () => { try { localStorage.setItem('mdef-save', JSON.stringify(MD.save)); } catch (e) { /* 무시 */ } };
-  MD.resetSave = () => { MD.save = DEFAULT(); MD.persist(); };
-
-  // ===== 에셋 =====
-  const atlases = {};
-  const frameIndex = {};
-  MD.frame = name => frameIndex[name] || null;
-
-  function loadImage(src) {
-    return new Promise((res, rej) => {
-      const img = new Image();
-      img.onload = () => res(img);
-      img.onerror = () => rej(new Error('image ' + src));
-      img.src = src;
-    });
-  }
-
-  MD.loadAtlas = async name => {
-    const [json, img] = await Promise.all([
-      fetch('assets/' + name + '.json').then(r => r.json()),
-      loadImage('assets/' + name + '.png'),
-    ]);
-    atlases[name] = { img, frames: json.frames };
-    for (const k of Object.keys(json.frames)) {
-      const f = json.frames[k];
-      frameIndex[k] = { img, x: f[0], y: f[1], w: f[2], h: f[3] };
-    }
-  };
-
-  MD.loadFont = async () => {
+  G.loadFont = async () => {
     try {
       if (!window.FontFace) return;
       const ff = new FontFace('KenneyFuture', 'url(assets/kenney-future.ttf)');
@@ -171,40 +97,10 @@ window.MD = window.MD || {};
       document.fonts.add(ff);
     } catch (e) { /* 시스템 폰트 사용 */ }
   };
-
-  // 스프라이트 그리기: (x,y)는 기준점, ax/ay는 기준점 비율(기본 중앙)
-  MD.spr = (name, x, y, o) => {
-    const f = frameIndex[name];
-    if (!f) return false;
-    o = o || {};
-    const sc = o.scale == null ? 1 : o.scale;
-    const w = (o.w || f.w * sc), h = (o.h || f.h * sc);
-    const ax = o.ax == null ? 0.5 : o.ax, ay = o.ay == null ? 0.5 : o.ay;
-    const img = o.tint ? MD.tinted(name, o.tint) : f.img;
-    const sx = o.tint ? 0 : f.x, sy = o.tint ? 0 : f.y;
-    if (o.alpha != null) ctx.globalAlpha = o.alpha;
-    if (o.add) ctx.globalCompositeOperation = 'lighter';
-    if (o.rot || o.flipX || o.flipY) {
-      ctx.save();
-      ctx.translate(x, y);
-      if (o.rot) ctx.rotate(o.rot);
-      ctx.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
-      ctx.drawImage(img, sx, sy, f.w, f.h, -w * ax, -h * ay, w, h);
-      ctx.restore();
-    } else {
-      ctx.drawImage(img, sx, sy, f.w, f.h, x - w * ax, y - h * ay, w, h);
-    }
-    if (o.alpha != null) ctx.globalAlpha = 1;
-    if (o.add) ctx.globalCompositeOperation = 'source-over';
-    return true;
-  };
-
-  // 색을 입힌 스프라이트 캐시 (파티클/피격 플래시용)
-  const tintCache = {};
-  MD.tinted = (name, color) => {
-    const key = name + '|' + color;
+  function tinted(name, color) {
+    const key = name + color;
     if (tintCache[key]) return tintCache[key];
-    const f = frameIndex[name];
+    const f = frames[name];
     const c = document.createElement('canvas');
     c.width = f.w; c.height = f.h;
     const g = c.getContext('2d');
@@ -212,7 +108,58 @@ window.MD = window.MD || {};
     g.globalCompositeOperation = 'source-atop';
     g.fillStyle = color;
     g.fillRect(0, 0, f.w, f.h);
-    tintCache[key] = c;
-    return c;
+    return (tintCache[key] = c);
+  }
+  G.spr = (name, x, y, o) => {
+    const f = frames[name];
+    if (!f || !ctx) return false;
+    o = o || {};
+    const sc = o.scale == null ? 1 : o.scale;
+    const w = o.w || f.w * sc, h = o.h || f.h * sc;
+    const img = o.tint ? tinted(name, o.tint) : f.img;
+    const sx = o.tint ? 0 : f.x, sy = o.tint ? 0 : f.y;
+    const prevA = ctx.globalAlpha;
+    if (o.alpha != null) ctx.globalAlpha = prevA * o.alpha;
+    if (o.add) ctx.globalCompositeOperation = 'lighter';
+    if (o.rot) {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(o.rot);
+      ctx.drawImage(img, sx, sy, f.w, f.h, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    } else ctx.drawImage(img, sx, sy, f.w, f.h, x - w / 2, y - h / 2, w, h);
+    ctx.globalAlpha = prevA;
+    if (o.add) ctx.globalCompositeOperation = 'source-over';
+    return true;
+  };
+
+  // ===== 저장 =====
+  const KEY = 'neondash-save';
+  const DEFAULT = () => ({ v: 1, sfx: true, music: true, haptics: true, practiceHint: false, totalAttempts: 0, totalJumps: 0, levels: {} });
+  let data = DEFAULT();
+  try {
+    const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (raw && typeof raw === 'object' && raw.v === 1) data = Object.assign(DEFAULT(), raw);
+    if (!data.levels || typeof data.levels !== 'object' || Array.isArray(data.levels)) data.levels = {};
+  } catch (e) { /* 저장소 사용 불가 */ }
+  G.save = {
+    get data() { return data; },
+    persist() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* 무시 */ } },
+    level(id) {
+      // 손상/구버전 저장 데이터 보정 (levels가 null/문자열, 항목 누락, coins 누락 등)
+      if (!data.levels || typeof data.levels !== 'object' || Array.isArray(data.levels)) data.levels = {};
+      let l = data.levels[id];
+      if (!l || typeof l !== 'object' || Array.isArray(l)) l = data.levels[id] = {};
+      if (!(typeof l.best === 'number' && isFinite(l.best))) l.best = 0;
+      if (!(typeof l.practiceBest === 'number' && isFinite(l.practiceBest))) l.practiceBest = 0;
+      if (!(typeof l.attempts === 'number' && isFinite(l.attempts))) l.attempts = 0;
+      if (typeof l.done !== 'boolean') l.done = !!l.done;
+      if (!Array.isArray(l.coins)) l.coins = [false, false, false];
+      if (!(typeof l.bestTime === 'number' && isFinite(l.bestTime))) l.bestTime = null;
+      return l;
+    },
+    reset() { data = DEFAULT(); this.persist(); },
+  };
+
+  G.vibrate = p => {
+    try { if (data.haptics && navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 미지원 */ }
   };
 })();
