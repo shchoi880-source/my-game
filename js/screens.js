@@ -4,9 +4,55 @@
   const G = window.G;
   let W = G.W || 960, H = G.H || 540;
   const TAU = Math.PI * 2;
-  // 일시정지 버튼: 오른쪽 위에 붙임(화면 폭이 바뀌면 x 갱신). onResize보다 먼저 선언(TDZ 방지)
-  const PAUSE_BTN = { x: W - 66, y: 8, w: 56, h: 50 };
-  if (G.onResize) G.onResize(() => { W = G.W; H = G.H; PAUSE_BTN.x = W - 66; });
+  // 화면 가장자리 여백: 노치·둥근 모서리·홈 바(G.SAFE, core.js)를 피해서 UI를 붙임
+  const SAFE = () => G.SAFE || { l: 0, r: 0, t: 0, b: 0 };
+  let EL = 16, ER = 16, ET = 16, EB = 16; // 왼/오/위/아래 가장자리 x·y 여백(논리 px)
+  // 일시정지 버튼: 오른쪽 위. 눌리는 영역(72×64 ≈ 폰에서 50 CSS px)은 그린 모양보다 큼
+  const PAUSE_BTN = { x: W - 88, y: 0, w: 88, h: 72 };
+  function layout() {
+    W = G.W; H = G.H;
+    const sf = SAFE();
+    EL = Math.max(16, sf.l + 4); ER = Math.max(16, sf.r + 4);
+    ET = Math.max(14, sf.t + 4); EB = Math.max(14, sf.b + 4);
+    PAUSE_BTN.x = W - ER - 72; PAUSE_BTN.w = ER + 72; PAUSE_BTN.y = 0; PAUSE_BTN.h = ET + 58;
+  }
+  layout();
+  if (G.onResize) G.onResize(layout);
+  // 공통 버튼 규격
+  const R_BTN = 16, BTN_H = 52;
+  // 숫자 전용 글꼴: Kenney Future는 '5'가 'S'처럼 보이고 '%'를 전각으로 바꿔 그려서 숫자 표시는 이걸로
+  const NUMF = '"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif';
+  function num(ctx, str, x, y, size, color, o) {
+    o = o || {};
+    ctx.font = (o.weight || 800) + ' ' + size + 'px ' + NUMF;
+    ctx.textAlign = o.align || 'center';
+    ctx.textBaseline = 'middle';
+    const s = String(str);
+    y += size * 0.09; // 이 글꼴은 middle 기준이 살짝 위라서 Kenney 글자와 줄을 맞춤
+    ctx.lineJoin = 'round';
+    if (o.glow) {
+      const R = RN();
+      ctx.strokeStyle = R.rgba(color, 0.14 * o.glow); ctx.lineWidth = size * 0.4; ctx.strokeText(s, x, y);
+      ctx.strokeStyle = R.rgba(color, 0.3 * o.glow); ctx.lineWidth = size * 0.18; ctx.strokeText(s, x, y);
+    }
+    if (o.stroke) { ctx.lineWidth = o.stroke; ctx.strokeStyle = o.strokeColor || 'rgba(0,0,0,0.7)'; ctx.strokeText(s, x, y); }
+    ctx.fillStyle = color; ctx.fillText(s, x, y);
+  }
+  // 글자+숫자 섞인 한 줄: parts = [[글자, 숫자], ...] → 숫자만 숫자 글꼴. align: left/center/right
+  function mixed(ctx, parts, x, y, size, col, numCol, o) {
+    o = o || {};
+    const gap = o.gap || 0, lw = o.weight || 700;
+    const ws = parts.map(p => G.textW(p[0], size, lw) + numW(p[1], size, 800));
+    const total = ws.reduce((a, v) => a + v, 0) + gap * (parts.length - 1);
+    let cx = o.align === 'right' ? x - total : o.align === 'left' ? x : x - total / 2;
+    parts.forEach((p, j) => {
+      R0().txt(ctx, p[0], cx, y, size, col, { align: 'left', weight: lw, stroke: o.stroke });
+      num(ctx, p[1], cx + G.textW(p[0], size, lw), y, size, numCol || col, { align: 'left', weight: 800, stroke: o.stroke });
+      cx += ws[j] + gap;
+    });
+  }
+  const R0 = () => G.render;
+  const numW = (str, size, weight) => { const c = G.ctx; c.font = (weight || 800) + ' ' + size + 'px ' + NUMF; return c.measureText(String(str)).width; };
   G.scenes = G.scenes || {};
   const RN = () => G.render;
   const FX = () => G.fx;
@@ -66,7 +112,8 @@
   // 버튼 등록 + 눌림/호버 애니메이션 값(k: 0~1 눌림, h: 0~1 호버)
   function region(id, x, y, w, h, onClick, o) {
     o = o || {};
-    ui.btns.push({ id, x, y, w, h, onClick, fireOnDown: !!o.fireOnDown, disabled: !!o.disabled });
+    const pd = o.pad || 0; // 그린 것보다 넓게 눌리는 여백(작은 버튼의 터치 영역 ≥ 44 CSS px)
+    ui.btns.push({ id, x: x - pd, y: y - pd, w: w + pd * 2, h: h + pd * 2, onClick, fireOnDown: !!o.fireOnDown, disabled: !!o.disabled });
     let a = ui.anim[id];
     if (!a) a = ui.anim[id] = { k: 0, h: 0 };
     const pk = ui.press === id ? 1 : 0, hv = ui.hover === id ? 1 : 0;
@@ -82,16 +129,28 @@
     ctx.save();
     ctx.translate(x + w / 2, y + h / 2); ctx.scale(s, s);
     if (o.alpha != null) ctx.globalAlpha *= o.alpha;
-    R.rr(ctx, -w / 2, -h / 2, w, h, o.r || 14);
+    R.rr(ctx, -w / 2, -h / 2, w, h, R_BTN);
+    // 주 버튼(primary)만 색으로 채움. 나머지는 모두 어두운 바탕 + 얇은 테두리
     if (o.primary) {
       const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
       g.addColorStop(0, R.mix(col, '#ffffff', 0.25)); g.addColorStop(1, R.mix(col, '#000000', 0.35));
       ctx.fillStyle = g;
-    } else ctx.fillStyle = 'rgba(8,10,30,0.82)';
+    } else ctx.fillStyle = o.on ? R.rgba(col, 0.18) : 'rgba(8,10,30,0.82)';
     ctx.fill();
-    R.neonStroke(ctx, col, 2 + a.h, o.primary);
-    if (o.icon) o.icon(ctx, o.label2 ? -w / 2 + 26 : 0, 0, col);
-    if (label) R.glowText(ctx, label, o.icon && label ? 10 : 0, 1, o.size || 22, o.primary ? '#ffffff' : col, { glow: 0.5, core: !o.primary });
+    if (o.primary) R.neonStroke(ctx, col, 2 + a.h, true);
+    else if (o.quiet) { ctx.strokeStyle = R.rgba(col, 0.75 + 0.25 * a.h); ctx.lineWidth = 1.5; ctx.stroke(); }
+    else R.neonStroke(ctx, col, 1.5 + a.h);
+    const fg = o.primary ? '#ffffff' : (o.fg || col);
+    const tw = label ? (G.textW ? G.textW(label, o.size || 22, 800) : 0) : 0;
+    const iw = o.icon ? 24 : 0, gapI = o.icon && label ? 10 : 0, tr = o.trail ? 60 : 0;
+    // 아이콘+글자를 한 덩어리로 가운데 정렬(오른쪽 스위치가 있으면 그만큼 왼쪽으로)
+    const x0 = -(iw + gapI + tw) / 2 - tr / 2;
+    if (o.icon) o.icon(ctx, label ? x0 + iw / 2 : 0, 0, fg);
+    if (label) {
+      if (o.primary) R.glowText(ctx, label, x0 + iw + gapI + tw / 2, 1, o.size || 22, '#ffffff', { glow: 0.5, core: false, weight: 800 });
+      else R.txt(ctx, label, x0 + iw + gapI + tw / 2, 1, o.size || 22, fg, { weight: 800 });
+    }
+    if (o.trail) o.trail(ctx, w / 2 - 16 - 25, 0);
     ctx.restore();
     return a;
   }
@@ -133,9 +192,10 @@
     const R = RN();
     const a = Math.min(1, toastS.t * 3), w = Math.max(220, R.txt && (G.textW ? G.textW(toastS.msg, 18) : 200) + 50);
     ctx.globalAlpha = a;
-    R.rr(ctx, W / 2 - w / 2, H - 78, w, 44, 22); ctx.fillStyle = 'rgba(8,10,30,0.92)'; ctx.fill();
+    const ty = H - EB - 62;
+    R.rr(ctx, W / 2 - w / 2, ty, w, 48, R_BTN); ctx.fillStyle = 'rgba(8,10,30,0.92)'; ctx.fill();
     R.neonStroke(ctx, '#29f0ff', 1.5);
-    R.txt(ctx, toastS.msg, W / 2, H - 56, 18, '#ffffff', { weight: 700 });
+    R.txt(ctx, toastS.msg, W / 2, ty + 24, 18, '#ffffff', { weight: 700 });
     ctx.globalAlpha = 1;
   }
 
@@ -279,6 +339,19 @@
     ctx.beginPath(); ctx.moveTo(x + 5, y - 9); ctx.lineTo(x - 5, y); ctx.lineTo(x + 5, y + 9);
     ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
   }
+  function installIcon(ctx, x, y, col) {
+    ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x, y + 3); ctx.moveTo(x - 5, y - 2); ctx.lineTo(x, y + 3); ctx.lineTo(x + 5, y - 2);
+    ctx.moveTo(x - 9, y + 4); ctx.lineTo(x - 9, y + 9); ctx.lineTo(x + 9, y + 9); ctx.lineTo(x + 9, y + 4); ctx.stroke();
+    ctx.restore();
+  }
+  function switchIcon(on, col) {
+    return (ctx, x, y) => {
+      const R = RN();
+      R.rr(ctx, x - 25, y - 14, 50, 28, 14); ctx.fillStyle = on ? col : 'rgba(255,255,255,0.12)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x + (on ? 11 : -11), y, 10, 0, TAU); ctx.fillStyle = on ? '#04140c' : '#9aa0c0'; ctx.fill();
+    };
+  }
   function pauseIcon(ctx, x, y, col) { ctx.fillStyle = col; ctx.fillRect(x - 8, y - 10, 6, 20); ctx.fillRect(x + 2, y - 10, 6, 20); }
 
   // ======================================================================
@@ -344,21 +417,27 @@
       ctx.globalAlpha = 1;
       // 터치해서 시작
       if (t > 1.1) {
-        const pa = 0.55 + 0.45 * Math.sin(t * 4.2);
-        const sc = 1 + bt.pulse * 0.06;
-        ctx.save(); ctx.translate(W / 2, H - 188); ctx.scale(sc, sc); ctx.globalAlpha = pa;
-        R.rr(ctx, -200, -28, 400, 56, 28); ctx.fillStyle = 'rgba(5,6,20,0.65)'; ctx.fill();
-        R.neonStroke(ctx, '#29f0ff', 2);
+        // 주 행동: 꺼질 듯 깜빡이지 않고 0.8~1.0 사이로만 숨 쉬듯
+        const fin = eoc((t - 1.1) / 0.4);
+        const pa = fin * (0.8 + 0.2 * Math.sin(t * 3));
+        const sc = 1 + bt.pulse * 0.04;
+        const cy = H - 176 - Math.max(0, EB - 14) * 0.5;
+        ctx.save(); ctx.translate(W / 2, cy); ctx.scale(sc, sc); ctx.globalAlpha = pa;
+        R.rr(ctx, -190, -30, 380, 60, R_BTN); ctx.fillStyle = 'rgba(5,6,20,0.72)'; ctx.fill();
+        R.neonStroke(ctx, '#29f0ff', 2.5, true);
         R.glowText(ctx, '화면을 터치해서 시작', 0, 1, 26, '#ffffff', { glow: 0.6 });
         ctx.restore();
-        R.txt(ctx, G.isTouch() ? '탭 = 점프   공중에서 한 번 더 = 2단 점프' : 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, H - 140, 14, 'rgba(255,255,255,0.75)', { weight: 600, stroke: 4 });
+        ctx.globalAlpha = fin;
+        R.txt(ctx, G.isTouch() ? '탭 = 점프   공중에서 한 번 더 = 2단 점프' : 'PC: 스페이스 · ↑ · 클릭 = 점프   공중에서 한 번 더 = 2단 점프', W / 2, cy + 52, 15, 'rgba(255,255,255,0.75)', { weight: 600, stroke: 4 });
+        ctx.globalAlpha = 1;
       }
       const sd = G.save && G.save.data;
-      if (sd && sd.totalAttempts) R.txt(ctx, '총 시도 ' + sd.totalAttempts + '회', W - 20, H - 18, 14, 'rgba(255,255,255,0.5)', { align: 'right', weight: 600 });
-      R.txt(ctx, 'v1', 20, H - 18, 12, 'rgba(255,255,255,0.35)', { align: 'left', weight: 600 });
-      // 앱 설치 버튼: 폰에서, 아직 설치 앱으로 실행 중이 아닐 때만
+      if (sd && sd.totalAttempts) mixed(ctx, [['총 시도 ', sd.totalAttempts], ['회', '']], W - ER, H - EB - 6, 14, 'rgba(255,255,255,0.55)', null, { align: 'right', weight: 600 });
+      num(ctx, 'v1', EL, H - EB - 6, 12, 'rgba(255,255,255,0.4)', { align: 'left', weight: 600 });
+      // 앱 설치 버튼: 폰에서, 아직 설치 앱으로 실행 중이 아닐 때만. 보조 버튼이라 시작 안내보다 조용하게
       if (G.isTouch() && !(G.pwa && G.pwa.installed())) {
-        button(ctx, 'install', W - 196, 16, 180, 48, '앱 설치', installApp, { color: '#3dffb0', size: 20, r: 24 });
+        const iw = 136;
+        button(ctx, 'install', W - ER - iw, ET, iw, 46, '앱 설치', installApp, { color: '#8a90b8', fg: '#d4d7ee', quiet: true, size: 16, icon: installIcon, pad: 8 });
       }
       post(ctx);
     },
@@ -400,14 +479,14 @@
     const R = RN();
     const a = region(id, x, y, w, 52, onClick);
     ctx.save();
-    R.rr(ctx, x, y, w, 52, 12); ctx.fillStyle = 'rgba(255,255,255,' + (0.04 + a.h * 0.04) + ')'; ctx.fill();
+    R.rr(ctx, x, y, w, 52, R_BTN); ctx.fillStyle = 'rgba(255,255,255,' + (0.04 + a.h * 0.04) + ')'; ctx.fill();
     R.txt(ctx, label, x + 20, y + 26, 20, '#ffffff', { align: 'left', weight: 700 });
     const sx = x + w - 84, sy = y + 12;
     R.rr(ctx, sx, sy, 64, 28, 14); ctx.fillStyle = on ? 'rgba(61,255,176,0.35)' : 'rgba(255,255,255,0.08)'; ctx.fill();
     R.neonStroke(ctx, on ? '#3dffb0' : '#666a88', 1.5);
     const kx = sx + (on ? 50 : 14);
     ctx.beginPath(); ctx.arc(kx, sy + 14, 10, 0, TAU); ctx.fillStyle = on ? '#3dffb0' : '#9aa0c0'; ctx.fill();
-    R.txt(ctx, on ? 'ON' : 'OFF', sx - 12, y + 26, 13, on ? '#3dffb0' : '#9aa0c0', { align: 'right', weight: 800 });
+    R.txt(ctx, on ? 'ON' : 'OFF', sx - 12, y + 26, 14, on ? '#3dffb0' : '#9aa0c0', { align: 'right', weight: 800 });
     ctx.restore();
   }
   function drawCard(ctx, i, x, y, w, h, a) {
@@ -437,30 +516,38 @@
     ctx.restore();
     R.rr(ctx, 0, 0, w, h, 18);
     R.neonStroke(ctx, lock ? '#555a7a' : (focus ? '#ffffff' : th.accent), 2 + a.h + (focus ? 0.5 : 0), !lock);
+    // 글자 크기 3단계: 이름 22 · 퍼센트 36 · 나머지 14
+    if (lock) {
+      // 잠긴 카드: 이름 + 자물쇠 + 해금 조건만(뒤에 다른 내용이 비치지 않게)
+      R.rr(ctx, 0, 0, w, h, 18); ctx.fillStyle = 'rgba(3,4,12,0.55)'; ctx.fill();
+      R.txt(ctx, 'LEVEL ' + (i + 1), 16, 22, 14, 'rgba(255,255,255,0.55)', { align: 'left', weight: 800, stroke: 3 });
+      R.txt(ctx, lv.name || lv.id, w / 2, 98, 22, 'rgba(255,255,255,0.5)', { weight: 800, maxW: w - 16 });
+      lockIcon(ctx, w / 2, h / 2 + 22, 1.4, '#9aa0c0');
+      R.txt(ctx, '이전 레벨', w / 2, h / 2 + 82, 14, '#9aa0c0', { weight: 700, maxW: w - 12 });
+      R.txt(ctx, '클리어 시 해금', w / 2, h / 2 + 102, 14, '#9aa0c0', { weight: 700, maxW: w - 12 });
+      ctx.restore();
+      return;
+    }
     R.txt(ctx, 'LEVEL ' + (i + 1), 16, 22, 14, '#ffffff', { align: 'left', weight: 800, stroke: 3 });
-    if (sv.done) { R.rr(ctx, w - 70, 12, 58, 22, 11); ctx.fillStyle = '#3dffb0'; ctx.fill(); R.txt(ctx, 'CLEAR', w - 41, 23, 12, '#04140c', { weight: 900 }); }
+    if (sv.done) { R.rr(ctx, w - 74, 11, 62, 24, 12); ctx.fillStyle = '#3dffb0'; ctx.fill(); R.txt(ctx, 'CLEAR', w - 43, 23, 14, '#04140c', { weight: 900 }); }
     R.glowText(ctx, lv.name || lv.id, w / 2, 98, 22, '#ffffff', { glow: 0.4, weight: 800 });
     // 난이도
     const dc = DIFF_COL[Math.min(4, i)];
     stars(ctx, w / 2, 130, i + 1, 5, 18, dc);
-    R.txt(ctx, DIFF[Math.min(4, i)], w / 2, 154, i === 4 ? 17 : 14, dc, { weight: 900, stroke: i === 4 ? 3 : 0 });
+    R.txt(ctx, DIFF[Math.min(4, i)], w / 2, 154, 14, dc, { weight: 900, stroke: 3 });
     // 최고 %
     const best = sel.practice ? (sv.practiceBest || 0) : (sv.best || 0);
-    R.glowText(ctx, best + '%', w / 2, 194, 40, sel.practice ? '#5dff7a' : '#ffffff', { glow: 0.5 });
-    R.rr(ctx, 18, 222, w - 36, 8, 4); ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fill();
-    if (best > 0) { R.rr(ctx, 18, 222, (w - 36) * best / 100, 8, 4); ctx.fillStyle = sel.practice ? '#5dff7a' : th.accent; ctx.fill(); }
-    R.txt(ctx, (sel.practice ? '연습 최고' : '최고 기록') + ' · 시도 ' + (sv.attempts || 0), w / 2, 244, 12, 'rgba(255,255,255,0.65)', { weight: 700, maxW: w - 16 });
+    num(ctx, best + '%', w / 2, 192, 36, sel.practice ? '#5dff7a' : '#ffffff', { weight: 900, glow: 0.5 });
+    R.rr(ctx, 18, 220, w - 36, 8, 4); ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fill();
+    if (best > 0) { R.rr(ctx, 18, 220, (w - 36) * best / 100, 8, 4); ctx.fillStyle = sel.practice ? '#5dff7a' : th.accent; ctx.fill(); }
+    mixed(ctx, [[(sel.practice ? '연습 최고' : '최고 기록') + ' · 시도 ', String(sv.attempts || 0)]], w / 2, 244, 14, 'rgba(255,255,255,0.7)');
     // 코인
-    for (let c = 0; c < 3; c++) coinSlot(ctx, w / 2 - 30 + c * 30, 268, 10, sv.coins && sv.coins[c]);
+    for (let c = 0; c < 3; c++) coinSlot(ctx, w / 2 - 30 + c * 30, 270, 10, sv.coins && sv.coins[c]);
     // 최고 점수 / 최대 콤보
     const bs = sv.bestScore || 0;
-    R.txt(ctx, bs ? 'SCORE ' + fmtNum(bs) : 'SCORE -', w / 2, 292, 13, bs ? '#ffe14d' : 'rgba(255,255,255,0.35)', { weight: 900, maxW: w - 16 });
-    if (sv.maxCombo) R.txt(ctx, 'MAX COMBO ' + sv.maxCombo, w / 2, 306, 10, 'rgba(255,255,255,0.55)', { weight: 800, maxW: w - 16 });
-    if (lock) {
-      R.rr(ctx, 0, 0, w, h, 18); ctx.fillStyle = 'rgba(3,4,12,0.88)'; ctx.fill();
-      lockIcon(ctx, w / 2, h / 2 - 20, 1.6, '#9aa0c0');
-      R.txt(ctx, '이전 레벨 클리어 시 해금', w / 2, h / 2 + 40, 13, '#9aa0c0', { weight: 700, maxW: w - 12 });
-    }
+    if (bs) num(ctx, 'SCORE ' + fmtNum(bs), w / 2, 296, 14, '#ffe14d', { weight: 800 });
+    else num(ctx, 'SCORE –', w / 2, 296, 14, 'rgba(255,255,255,0.4)', { weight: 700 });
+    if (sv.maxCombo) num(ctx, 'MAX COMBO ' + sv.maxCombo, w / 2, 316, 14, 'rgba(255,255,255,0.6)', { weight: 700 });
     ctx.restore();
   }
   G.scenes.select = {
@@ -488,20 +575,17 @@
       // 헤더
       const hk = eoc(t / 0.4);
       ctx.save(); ctx.translate(0, (1 - hk) * -60);
-      button(ctx, 'back', 16, 16, 52, 48, '', () => { A.sfx('back'); nav('title'); }, { icon: backIcon, r: 14 });
-      R.glowText(ctx, '레벨 선택', 90, 41, 30, '#ffffff', { align: 'left', glow: 0.5 });
-      // 연습 모드 토글
-      const px = W - 300, pw = 210;
-      const pa = region('practice', px, 16, pw, 48, () => {
+      const hy = ET;
+      button(ctx, 'back', EL, hy, 56, BTN_H, '', () => { A.sfx('back'); nav('title'); }, { icon: backIcon, color: '#8a90b8', fg: '#ffffff', pad: 6 });
+      R.glowText(ctx, '레벨 선택', EL + 76, hy + BTN_H / 2, 30, '#ffffff', { align: 'left', glow: 0.5 });
+      // 연습 모드 토글 (같은 버튼 규격 + 오른쪽 스위치)
+      const gw = 56, pw = 200, px = W - ER - gw - 12 - pw;
+      const pon = sel.practice, pcol = pon ? '#5dff7a' : '#8a90b8';
+      button(ctx, 'practice', px, hy, pw, BTN_H, '연습 모드', () => {
         sel.practice = !sel.practice; A.sfx('click');
-        if (FX()) FX().uiBurst(px + pw - 30, 40, sel.practice ? '#5dff7a' : '#29f0ff', 10);
-      });
-      R.rr(ctx, px, 16, pw, 48, 24); ctx.fillStyle = sel.practice ? 'rgba(93,255,122,0.2)' : 'rgba(8,10,30,0.82)'; ctx.fill();
-      R.neonStroke(ctx, sel.practice ? '#5dff7a' : '#6a70a0', 1.5 + pa.h);
-      R.txt(ctx, '연습 모드', px + 22, 40, 18, sel.practice ? '#5dff7a' : '#c0c4e0', { align: 'left', weight: 800 });
-      R.rr(ctx, px + pw - 66, 26, 50, 28, 14); ctx.fillStyle = sel.practice ? '#5dff7a' : 'rgba(255,255,255,0.12)'; ctx.fill();
-      ctx.beginPath(); ctx.arc(px + pw - (sel.practice ? 30 : 52), 40, 10, 0, TAU); ctx.fillStyle = sel.practice ? '#04140c' : '#9aa0c0'; ctx.fill();
-      button(ctx, 'gear', W - 76, 16, 60, 48, '', () => { sel.settings = true; A.sfx('click'); }, { icon: gearIcon, r: 14 });
+        if (FX()) FX().uiBurst(px + pw - 40, hy + BTN_H / 2, sel.practice ? '#5dff7a' : '#29f0ff', 10);
+      }, { color: pcol, fg: pon ? '#5dff7a' : '#d4d7ee', size: 18, on: pon, trail: switchIcon(pon, '#5dff7a'), pad: 6 });
+      button(ctx, 'gear', W - ER - gw, hy, gw, BTN_H, '', () => { sel.settings = true; A.sfx('click'); }, { icon: gearIcon, color: '#8a90b8', fg: '#ffffff', pad: 6 });
       ctx.restore();
       // 카드
       const L = levels();
@@ -509,7 +593,10 @@
         R.glowText(ctx, '레벨 데이터를 불러오지 못했어요', W / 2, H / 2, 24, '#ff3df2');
       } else {
         const n = L.length, gap = 12, cw = clamp(Math.floor((W - 60 - (n - 1) * gap) / n), 150, 200), total = n * cw + (n - 1) * gap;
-        const ch = 316, sx = W / 2 - total / 2, cy = 92 + Math.max(0, (H - 540) / 2);
+        // 카드 줄을 헤더(위)와 하단 합계(아래) 사이 세로 가운데에
+        const ch = 334, sx = W / 2 - total / 2;
+        const top = ET + BTN_H + 12, bot = H - EB - 64 - (sel.practice ? 26 : 0);
+        const cy = Math.round(Math.max(top, top + (bot - top - ch) / 2));
         for (let i = 0; i < n; i++) {
           const k = eob((t - 0.1 - i * 0.07) / 0.5);
           if (k <= 0) continue;
@@ -519,17 +606,18 @@
           drawCard(ctx, i, x, y, cw, ch, a);
           ctx.restore();
         }
-        if (sel.practice) R.txt(ctx, '연습 모드: 3초마다 자동 체크포인트 · 기록은 연습 최고에만 저장', W / 2, cy + ch + 14, 14, '#5dff7a', { weight: 700 });
+        if (sel.practice) R.txt(ctx, '연습 모드: 3초마다 자동 체크포인트 · 기록은 연습 최고에만 저장', W / 2, cy + ch + 20, 14, '#5dff7a', { weight: 700, stroke: 3 });
       }
       // 하단 합계
       const sd = G.save && G.save.data;
       if (sd && L.length) {
         let clr = 0, coins = 0;
         for (const lv of L) { const s = lvSave(lv); if (s.done) clr++; coins += (s.coins || []).filter(Boolean).length; }
-        const fy = H - 70, ft = eoc((t - 0.5) / 0.4);
+        const fy = H - EB - 26, ft = eoc((t - 0.5) / 0.4);
         ctx.globalAlpha = ft;
-        R.rr(ctx, W / 2 - 260, fy - 22, 520, 44, 22); ctx.fillStyle = 'rgba(8,10,30,0.75)'; ctx.fill();
-        R.txt(ctx, '클리어 ' + clr + '/' + L.length + '     코인 ' + coins + '/' + (L.length * 3) + '     총 시도 ' + (sd.totalAttempts || 0), W / 2, fy, 16, '#ffffff', { weight: 700 });
+        R.rr(ctx, W / 2 - 260, fy - 22, 520, 44, R_BTN); ctx.fillStyle = 'rgba(8,10,30,0.75)'; ctx.fill();
+        // 숫자는 숫자 글꼴로(Kenney Future의 '5'는 'S'처럼 보임)
+        mixed(ctx, [['클리어 ', clr + '/' + L.length], ['코인 ', coins + '/' + (L.length * 3)], ['총 시도 ', String(sd.totalAttempts || 0)]], W / 2, fy, 16, 'rgba(255,255,255,0.7)', '#ffffff', { gap: 36 });
         ctx.globalAlpha = 1;
       }
       // 설정 패널
@@ -547,7 +635,7 @@
         toggleRow(ctx, 'tsfx', px + 30, py + 76, pw - 60, '효과음', d.sfx !== false, () => toggleSetting('sfx'));
         toggleRow(ctx, 'tmus', px + 30, py + 136, pw - 60, '음악', d.music !== false, () => toggleSetting('music'));
         toggleRow(ctx, 'tvib', px + 30, py + 196, pw - 60, '진동', d.haptics !== false, () => toggleSetting('haptics'));
-        button(ctx, 'setclose', W / 2 - 90, py + ph - 66, 180, 48, '닫기', () => { sel.settings = false; A.sfx('back'); }, { primary: true, color: '#ff3df2' });
+        button(ctx, 'setclose', W / 2 - 90, py + ph - 70, 180, BTN_H, '닫기', () => { sel.settings = false; A.sfx('back'); }, { primary: true, color: '#ff3df2' });
         ctx.restore();
       }
       post(ctx);
@@ -793,7 +881,9 @@
     const p = st.progress || 0;
     pl.pctShown += (p - pl.pctShown) * 0.3;
     // 진행 바
-    const bx = 250, bw = W - 500, by = 18, bh = 8;
+    // 바는 가운데. 양쪽(시도 줄 / % + 일시정지)과 노치 여백만큼 비켜서
+    const side = Math.max(250, EL + 236, ER + 236);
+    const bx = side, bw = W - side * 2, by = ET + 8, bh = 8;
     R.rr(ctx, bx - 3, by - 3, bw + 6, bh + 6, 7); ctx.fillStyle = 'rgba(4,5,16,0.65)'; ctx.fill();
     R.rr(ctx, bx, by, bw, bh, 4); ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fill();
     if (pl.pctShown > 0.002) {
@@ -806,31 +896,38 @@
     if (best > 0 && best < 100) {
       const mx = bx + bw * best / 100;
       ctx.fillStyle = '#ffffff'; ctx.fillRect(mx - 1, by - 6, 2, bh + 12);
-      R.txt(ctx, 'BEST', mx, by + bh + 14, 9, 'rgba(255,255,255,0.75)', { weight: 800 });
+      R.txt(ctx, 'BEST', mx, by + bh + 16, 12, 'rgba(255,255,255,0.8)', { weight: 800, stroke: 3 });
     }
     if (pl.practice) {
       ctx.fillStyle = '#5dff7a';
       for (const c of pl.checkpoints) { const cx = bx + bw * clamp(c.x / (lv.length || 1), 0, 1); ctx.save(); ctx.translate(cx, by + bh / 2); ctx.rotate(Math.PI / 4); ctx.fillRect(-3, -3, 6, 6); ctx.restore(); }
     }
-    R.glowText(ctx, Math.floor(p * 100) + '%', bx + bw + 46, by + 4, 22, '#ffffff', { glow: 0.4 });
-    // 좌상단: 시도
-    R.txt(ctx, (pl.practice ? 'PRACTICE ' : 'ATTEMPT ') + pl.attempt, 18, 22, 18, pl.practice ? '#5dff7a' : '#ffffff', { align: 'left', weight: 900, stroke: 4 });
-    R.txt(ctx, lv.name || lv.id, 18, 44, 13, 'rgba(255,255,255,0.65)', { align: 'left', weight: 700, stroke: 3 });
+    // 오른쪽 위: 진행 % (일시정지 버튼 왼쪽, 오른쪽 정렬)
+    const rx = W - ER - 72 - 10;
+    num(ctx, Math.floor(p * 100) + '%', rx, by + 5, 24, '#ffffff', { align: 'right', weight: 900, glow: 0.4, stroke: 3 });
+    // 왼쪽 위: 한 줄(모드+시도 · 레벨 이름) + 그 아래 코인
+    const mode = (pl.practice ? 'PRACTICE ' : 'ATTEMPT ');
+    const mc = pl.practice ? '#5dff7a' : '#ffffff';
+    const ly = by + 5, mw = G.textW(mode, 16, 900), nw = numW(pl.attempt, 17, 900);
+    R.txt(ctx, mode, EL, ly, 16, mc, { align: 'left', weight: 900, stroke: 4 });
+    num(ctx, pl.attempt, EL + mw, ly, 17, mc, { align: 'left', weight: 900, stroke: 4 });
+    R.txt(ctx, '·  ' + (lv.name || lv.id), EL + mw + nw + 10, ly, 16, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700, stroke: 4, maxW: bx - 16 - (EL + mw + nw + 10) });
     for (let i = 0; i < 3; i++) {
       pl.coinPop[i] = Math.max(0, pl.coinPop[i] - lastDt * 2.5);
       const got = st.coins && st.coins[i];
-      if (!got && sv.coins && sv.coins[i]) { ctx.globalAlpha = 0.35; coinSlot(ctx, 26 + i * 24, 68, 8, true); ctx.globalAlpha = 1; }
-      else coinSlot(ctx, 26 + i * 24, 68, 8, got, pl.coinPop[i]);
+      const cx = EL + 10 + i * 26, cyc = ly + 30;
+      if (!got && sv.coins && sv.coins[i]) { ctx.globalAlpha = 0.35; coinSlot(ctx, cx, cyc, 9, true); ctx.globalAlpha = 1; }
+      else coinSlot(ctx, cx, cyc, 9, got, pl.coinPop[i]);
     }
-    drawScoreCombo(ctx, st);
-    // 일시정지 버튼
-    const b = PAUSE_BTN;
-    R.rr(ctx, b.x + 6, b.y + 4, b.w - 12, b.h - 8, 12); ctx.fillStyle = 'rgba(4,5,16,0.55)'; ctx.fill();
-    R.neonStroke(ctx, '#ffffff', 1.5);
-    pauseIcon(ctx, b.x + b.w / 2, b.y + b.h / 2, '#ffffff');
+    drawScoreCombo(ctx, st, rx, ly);
+    // 일시정지 버튼: 그린 모양은 52×46, 눌리는 영역은 PAUSE_BTN(더 큼)
+    const pbx = W - ER - 60, pby = ET - 4;
+    R.rr(ctx, pbx, pby, 52, 46, 14); ctx.fillStyle = 'rgba(4,5,16,0.55)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+    pauseIcon(ctx, pbx + 26, pby + 23, '#ffffff');
   }
-  // 좌상단(ATTEMPT 아래): 점수 카운트업 + 콤보 "x23" + 배수 배지
-  function drawScoreCombo(ctx, st) {
+  // 우상단(% 아래, 오른쪽 정렬): 점수 카운트업 + 콤보 "23" + 배수 배지
+  function drawScoreCombo(ctx, st, rx, ly) {
     const R = RN(), dt = lastDt;
     const score = scoreOf(st), combo = comboOf(st);
     const diff = score - pl.scoreShown;
@@ -841,36 +938,39 @@
     pl.comboShake = Math.max(0, pl.comboShake - dt * 2.2);
     if (combo > 0) pl.comboShown = combo;
     // 점수
-    const sy = 98, ss = 1 + 0.12 * pl.scorePop;
-    ctx.save(); ctx.translate(18, sy); ctx.scale(ss, ss);
-    R.txt(ctx, fmtNum(pl.scoreShown), 0, 0, 24, '#ffffff', { align: 'left', weight: 900, stroke: 4 });
+    const sy = ly + 36, ss = 1 + 0.12 * pl.scorePop;
+    ctx.save(); ctx.translate(rx, sy); ctx.scale(ss, ss);
+    num(ctx, fmtNum(pl.scoreShown), 0, 0, 22, '#ffffff', { align: 'right', weight: 900, stroke: 4 });
     ctx.restore();
-    R.txt(ctx, 'SCORE', 20, sy + 18, 9, 'rgba(255,255,255,0.55)', { align: 'left', weight: 800, stroke: 2 });
-    // 콤보: 진행 중이면 표시, 끊기면 흔들리며 떨어져 사라짐
-    let a = combo > 0 ? 1 : pl.comboShake;
-    if (a <= 0.01 || (!pl.comboShown && combo <= 0)) return;
-    const cy = 136;
+    R.txt(ctx, 'SCORE', rx, sy + 20, 12, 'rgba(255,255,255,0.6)', { align: 'right', weight: 800, stroke: 3 });
+    // 콤보: 5 이상일 때만(1~4 콤보는 잡음). 끊기면 흔들리며 떨어져 사라짐
+    const showC = combo >= 5;
+    const a = showC ? 1 : (pl.lostCombo >= 5 ? pl.comboShake : 0);
+    if (a <= 0.01) return;
+    const cy = sy + 50;
     const sh = pl.comboShake;
-    const dx = sh > 0 ? Math.sin(sh * 70) * 6 * sh : 0, dy = combo > 0 ? 0 : (1 - sh) * 24;
-    const c = combo > 0 ? combo : (pl.lostCombo || pl.comboShown);
-    const col = combo > 0 ? (pl.mult >= 4 ? '#ff3df2' : pl.mult >= 3 ? '#ffe14d' : pl.mult >= 2 ? '#29f0ff' : '#ffffff') : '#ff3d6a';
-    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1); ctx.translate(18 + dx, cy + dy);
-    const ps = 1 + 0.25 * pl.comboPop;
-    ctx.save(); ctx.scale(ps, ps);
-    R.txt(ctx, String(c), 0, 0, 22, col, { align: 'left', weight: 900, stroke: 4 });
-    ctx.restore();
-    const tw = (G.textW ? G.textW(String(c), 22) : 40) * ps;
-    if (combo > 0 && pl.mult > 1) {
-      const bx = tw + 10, bs = 1 + 0.35 * pl.comboPop;
-      ctx.save(); ctx.translate(bx + 18, 0); ctx.scale(bs, bs);
-      R.rr(ctx, -18, -11, 36, 22, 11); ctx.fillStyle = col; ctx.fill();
-      R.txt(ctx, '×' + pl.mult, 0, 1, 13, '#05060f', { weight: 900 });
+    const dx = sh > 0 ? Math.sin(sh * 70) * 6 * sh : 0, dy = showC ? 0 : (1 - sh) * 24;
+    const c = showC ? combo : (pl.lostCombo || pl.comboShown);
+    const col = showC ? (pl.mult >= 4 ? '#ff3df2' : pl.mult >= 3 ? '#ffe14d' : pl.mult >= 2 ? '#29f0ff' : '#ffffff') : '#ff3d6a';
+    ctx.save(); ctx.globalAlpha = clamp(a, 0, 1); ctx.translate(rx + dx, cy + dy);
+    // 오른쪽부터: [배지/라벨] [숫자]
+    let tagW;
+    if (showC && pl.mult > 1) {
+      tagW = 40;
+      const bs = 1 + 0.35 * pl.comboPop;
+      ctx.save(); ctx.translate(-20, 0); ctx.scale(bs, bs);
+      R.rr(ctx, -20, -12, 40, 24, 12); ctx.fillStyle = col; ctx.fill();
+      num(ctx, '×' + pl.mult, 0, 1, 15, '#05060f', { weight: 900 });
       ctx.restore();
-    } else if (combo <= 0) {
-      R.txt(ctx, 'BREAK', tw + 10, 1, 12, '#ff3d6a', { align: 'left', weight: 900, stroke: 3 });
     } else {
-      R.txt(ctx, 'COMBO', tw + 8, 2, 10, 'rgba(255,255,255,0.6)', { align: 'left', weight: 800, stroke: 2 });
+      const lab = showC ? 'COMBO' : 'BREAK';
+      tagW = G.textW(lab, 12, 800);
+      R.txt(ctx, lab, 0, 2, 12, showC ? 'rgba(255,255,255,0.65)' : '#ff3d6a', { align: 'right', weight: 800, stroke: 3 });
     }
+    const ps = 1 + 0.25 * pl.comboPop;
+    ctx.save(); ctx.translate(-tagW - 8, 0); ctx.scale(ps, ps);
+    num(ctx, String(c), 0, 0, 22, col, { align: 'right', weight: 900, stroke: 4 });
+    ctx.restore();
     ctx.restore();
   }
   function drawDeathInfo(ctx) {
@@ -904,12 +1004,12 @@
     R.neonStroke(ctx, '#29f0ff', 2, true);
     R.glowText(ctx, '일시정지', W / 2, py + 44, 32, '#ffffff', { glow: 0.6 });
     const st = pl.run.state;
-    R.txt(ctx, (pl.level.name || '') + ' · ' + Math.floor((st.progress || 0) * 100) + '%' + (pl.practice ? ' · 연습' : ''), W / 2, py + 82, 15, 'rgba(255,255,255,0.7)', { weight: 700 });
+    mixed(ctx, [[(pl.level.name || '') + ' · ', Math.floor((st.progress || 0) * 100) + '%'], [pl.practice ? ' · 연습' : '', '']], W / 2, py + 82, 15, 'rgba(255,255,255,0.7)');
     const bx = px + 50, bw2 = pw - 100;
-    button(ctx, 'p_resume', bx, py + 108, bw2, 56, '계속', resume, { primary: true, color: '#29f0ff', size: 24 });
-    button(ctx, 'p_restart', bx, py + 176, bw2, 50, '처음부터', () => restartFromPause(), { color: '#ffffff' });
-    button(ctx, 'p_practice', bx, py + 238, bw2, 50, pl.practice ? '연습 모드 끄기' : '연습 모드로 전환', () => restartFromPause(!pl.practice), { color: '#5dff7a' });
-    button(ctx, 'p_select', bx, py + 300, bw2, 50, '레벨 선택', () => { A.sfx('back'); A.stop(); nav('select', { practice: pl.practice, focus: pl.li }); }, { color: '#ff3df2' });
+    button(ctx, 'p_resume', bx, py + 106, bw2, 56, '계속', resume, { primary: true, color: '#29f0ff', size: 24 });
+    button(ctx, 'p_restart', bx, py + 174, bw2, BTN_H, '처음부터', () => restartFromPause(), { color: '#ffffff' });
+    button(ctx, 'p_practice', bx, py + 236, bw2, BTN_H, pl.practice ? '연습 모드 끄기' : '연습 모드로 전환', () => restartFromPause(!pl.practice), { color: '#5dff7a' });
+    button(ctx, 'p_select', bx, py + 298, bw2, BTN_H, '레벨 선택', () => { A.sfx('back'); A.stop(); nav('select', { practice: pl.practice, focus: pl.li }); }, { color: '#ff3df2' });
   }
 
   G.scenes.play = {
@@ -1195,10 +1295,10 @@
         const bw = 200, bg2 = 16;
         const n = hasNext ? 3 : 2, bx0 = W / 2 - (n * bw + (n - 1) * bg2) / 2;
         let bi = 0;
-        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, 54, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
-        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, 54, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
-        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, 54, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level }); }, { color: '#ff3df2', size: 22 });
-        button(ctx, 'c_share', W / 2 - 130, by + 64, 260, 44, '기록 카드 공유 / 저장', () => { A.sfx('click'); shareCard(); }, { color: '#ffcf3d', size: 18 });
+        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, BTN_H, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
+        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, BTN_H, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
+        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, BTN_H, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level }); }, { color: '#ff3df2', size: 22 });
+        button(ctx, 'c_share', W / 2 - 130, by + 62, 260, 46, '기록 카드 공유 / 저장', () => { A.sfx('click'); shareCard(); }, { color: '#ffcf3d', size: 18 });
         ctx.restore();
       }
       post(ctx);

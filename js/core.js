@@ -18,6 +18,17 @@ window.G = window.G || {};
   // 터치가 주 입력인 기기(폰·태블릿)인지: PC(마우스)는 창이 세로여도 회전 안내를 띄우지 않음
   const mq = q => { try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; } };
   G.isTouch = () => mq('(pointer: coarse)') || (!mq('(pointer: fine)') && (navigator.maxTouchPoints || 0) > 0);
+  // env(safe-area-inset-*)는 JS에서 직접 못 읽으므로 숨긴 요소의 padding으로 읽음
+  G.SAFE = { l: 0, r: 0, t: 0, b: 0 };
+  let probe = null;
+  function readInsets() {
+    try {
+      if (!probe) probe = document.getElementById('safe-probe');
+      if (!probe) return { t: 0, r: 0, b: 0, l: 0 };
+      const cs = getComputedStyle(probe), f = v => parseFloat(v) || 0;
+      return { t: f(cs.paddingTop), r: f(cs.paddingRight), b: f(cs.paddingBottom), l: f(cs.paddingLeft) };
+    } catch (e) { return { t: 0, r: 0, b: 0, l: 0 }; }
+  }
   G.resize = () => {
     if (!canvas) return;
     let vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
@@ -46,6 +57,14 @@ window.G = window.G || {};
     G.scale = cssW / w;
     G.W = w; G.H = cssH / G.scale;
     G.dpr = canvas.width / cssW;
+    // 4) 노치·둥근 모서리·홈 바(safe-area): 캔버스와 겹치는 만큼만 논리 px로 저장
+    //    90° 돌려 그릴 때: 화면 위 = 논리 왼쪽, 화면 아래 = 논리 오른쪽, 화면 오른쪽 = 논리 위, 화면 왼쪽 = 논리 아래
+    const ins = readInsets();
+    const physW = G.rotated ? cssH : cssW, physH = G.rotated ? cssW : cssH;
+    const mx = (window.innerWidth - physW) / 2, my = (window.innerHeight - physH) / 2;
+    const ov = (v, m) => Math.max(0, v - Math.max(0, m)) / G.scale;
+    const pt = ov(ins.t, my), pb = ov(ins.b, my), pL = ov(ins.l, mx), pR = ov(ins.r, mx);
+    G.SAFE = G.rotated ? { l: pt, r: pb, t: pR, b: pL } : { l: pL, r: pR, t: pt, b: pb };
     for (const fn of G.resizeHooks) { try { fn(); } catch (e) { console.warn(e); } }
   };
   if (canvas) {
