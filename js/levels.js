@@ -58,7 +58,7 @@
   // ───────────────────────── LV1 첫 박자 (120bpm, 380px/s, 1박 190px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv1', name: '첫 박자', track: 'lv1', bpm: 120, speed: 380, beats: 90,
-    theme: { bg: '#0b0f2a', bg2: '#1b0f3a', accent: '#29f0ff', accent2: '#ff3df2', ground: '#121a44' },
+    theme: { bg: '#0b0f2a', bg2: '#1b0f3a', accent: '#29f0ff', accent2: '#ff3df2', ground: '#121a44', scene: 'city' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(5, '첫 가시');
@@ -102,7 +102,7 @@
   // ───────────────────────── LV2 빛의 계단 (128bpm, 400px/s, 1박 187.5px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv2', name: '빛의 계단', track: 'lv2', bpm: 128, speed: 400, beats: 118,
-    theme: { bg: '#04141a', bg2: '#082a2c', accent: '#3dff9e', accent2: '#ffe23d', ground: '#0b2b2a' },
+    theme: { bg: '#04141a', bg2: '#082a2c', accent: '#3dff9e', accent2: '#ffe23d', ground: '#0b2b2a', scene: 'ziggurat' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(5, '발판 건너기');
@@ -159,7 +159,7 @@
   // ───────────────────────── LV3 톱니 정원 (136bpm, 420px/s, 1박 185.3px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv3', name: '톱니 정원', track: 'lv3', bpm: 136, speed: 420, beats: 136,
-    theme: { bg: '#170806', bg2: '#2a1206', accent: '#ff8a1f', accent2: '#ff2d6b', ground: '#2b140b' },
+    theme: { bg: '#170806', bg2: '#2a1206', accent: '#ff8a1f', accent2: '#ff2d6b', ground: '#2b140b', scene: 'gears' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(5, '톱니 입구');
@@ -229,7 +229,7 @@
   // ───────────────────────── LV4 거꾸로 내리는 비 (146bpm, 450px/s, 1박 184.9px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv4', name: '거꾸로 내리는 비', track: 'lv4', bpm: 146, speed: 450, beats: 170,
-    theme: { bg: '#0c0620', bg2: '#22083a', accent: '#b46bff', accent2: '#3dfff0', ground: '#1a0e38' },
+    theme: { bg: '#0c0620', bg2: '#22083a', accent: '#b46bff', accent2: '#3dfff0', ground: '#1a0e38', scene: 'spires' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(5, '낮은 하늘');
@@ -320,7 +320,7 @@
   // ───────────────────────── LV5 임계점 (160bpm, 480px/s, 1박 180px) ─────────────────────────
   LEVELS.push(makeLevel({
     id: 'lv5', name: '임계점', track: 'lv5', bpm: 160, speed: 480, beats: 213,
-    theme: { bg: '#12000a', bg2: '#2a0016', accent: '#ff2d6b', accent2: '#fff23d', ground: '#2e0014' },
+    theme: { bg: '#12000a', bg2: '#2a0016', accent: '#ff2d6b', accent2: '#fff23d', ground: '#2e0014', scene: 'ruins' },
   }, (L) => {
     L.sec(0, '출발');
     L.sec(6, '점화');
