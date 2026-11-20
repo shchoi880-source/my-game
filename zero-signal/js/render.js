@@ -2378,7 +2378,7 @@
     const flame = still ? 38 : 38 + 4 * Math.sin(t * TAU * 8),
       l = Math.hypot(p.vx || 0, p.vy || 0) || 1;
     // i-frames: calm translucency with a slow (1.5 Hz) breathing, well under the 2 Hz comfort limit
-    const alpha = inv ? 0.55 + (still ? 0 : 0.15 * Math.sin(t * TAU * 1.5)) : 1;
+    const alpha = inv ? 0.45 + (still ? 0 : 0.15 * Math.sin(t * TAU * 1.5)) : 0.8;
     // 기체는 작게(판정이 아닌 장식), 실제 판정은 가운데 점 하나 — 탄막 게임 관례
     ship(c, p.x, p.y, {
       scale: 0.62,
@@ -2391,20 +2391,33 @@
     });
     {
       // 판정 점: 항상 표시. 이 점에 닿을 때만 실드가 깎인다(기체 그림은 판정 아님)
+      // 어떤 배경·탄환 위에서도 보이게: 검은 테두리 + 흰 심 + 하늘색(플레이어 색) 고리 + 은은한 빛
       const hr = p.hit || 5;
       c.save();
+      const glow = c.createRadialGradient(p.x, p.y, hr, p.x, p.y, hr + 16);
+      glow.addColorStop(0, 'rgba(120,210,255,0.55)');
+      glow.addColorStop(1, 'rgba(120,210,255,0)');
+      c.fillStyle = glow;
       c.beginPath();
-      c.arc(p.x, p.y, hr + 3.5, 0, TAU);
+      c.arc(p.x, p.y, hr + 16, 0, TAU);
+      c.fill();
+      c.beginPath();
+      c.arc(p.x, p.y, hr + 4, 0, TAU);
       c.fillStyle = C.ink;
       c.fill();
       c.beginPath();
-      c.arc(p.x, p.y, hr, 0, TAU);
+      c.arc(p.x, p.y, hr + 1, 0, TAU);
       c.fillStyle = '#ffffff';
       c.fill();
-      c.lineWidth = 2;
-      c.strokeStyle = focus ? C.pink || '#ff5fa2' : C.sky;
+      c.lineWidth = 3;
+      c.strokeStyle = focus ? '#ffffff' : C.sky;
       c.beginPath();
-      c.arc(p.x, p.y, hr + 5.5, 0, TAU);
+      c.arc(p.x, p.y, hr + 7, 0, TAU);
+      c.stroke();
+      c.lineWidth = 2;
+      c.strokeStyle = C.ink;
+      c.beginPath();
+      c.arc(p.x, p.y, hr + 9.5, 0, TAU);
       c.stroke();
       c.restore();
     }
