@@ -1,7 +1,7 @@
 // 오프라인 캐시. 파일을 고쳐 올릴 때마다 VERSION 을 올려 주세요.
 // 같은 출처(shchoi880-source.github.io)를 NEON JUMP(neonjump-*/neondash-*)와 함께 쓰므로
 // 정리할 때는 반드시 이 게임의 캐시(zerosignal-*, 옛 이름 zero-signal-*)만 지운다.
-const VERSION = 'zs-107';
+const VERSION = 'zs-108';
 const CACHE = 'zerosignal-' + VERSION;
 const OWN = /^(zerosignal|zero-signal)-/;
 const CORE = [

@@ -339,13 +339,22 @@
     },
     down(x, y) {
       G.audio.init();
+      // 설치 창은 '손을 뗄 때'만 브라우저가 허락함 → 여기서는 표시만 하고 up()에서 실행
       if (this.install && G.render.hit(this.install, x, y)) {
-        installApp();
+        this.installDown = true;
+        G.noLandscapeOnce = true;
         return;
       }
+      this.installDown = false;
       if (G.render.hit(this.start, x, y)) {
         G.audio.sfx('click');
         G.go('select');
+      }
+    },
+    up(x, y) {
+      if (this.installDown) {
+        this.installDown = false;
+        if (this.install && G.render.hit(this.install, x, y)) installApp();
       }
     },
     key(code, on) {

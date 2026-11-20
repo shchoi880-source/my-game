@@ -102,6 +102,11 @@
   let lockTried = false,
     persistAsked = false;
   const tryLandscape = () => {
+    // '앱 설치'를 누른 터치는 설치 창에 양보(전체화면 요청이 같은 터치를 먼저 써버리면 설치 창이 막힘)
+    if (G.noLandscapeOnce) {
+      G.noLandscapeOnce = false;
+      return;
+    }
     if (lockTried || !G.isTouch()) return;
     lockTried = true;
     const so = screen.orientation,
