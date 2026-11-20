@@ -1,5 +1,5 @@
 'use strict';
-// NEON DASH 레벨 검증기 (docs/SPEC.md §7)
+// NEON JUMP 레벨 검증기 (docs/SPEC.md §7)
 // 사용법 (프로젝트 루트에서):
 //   node tools/verify.js                 G.LEVELS 전체 (levels.js 없으면 내장 테스트 레벨)
 //   node tools/verify.js lv3             특정 레벨

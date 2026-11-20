@@ -1,7 +1,7 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'nd-14';
-const CACHE = 'neondash-' + VERSION;
+const VERSION = 'nd-15';
+const CACHE = 'neonjump-' + VERSION;
 const SFX = ['back', 'bigboom', 'book', 'chop', 'click', 'coin', 'confirm', 'door', 'draw', 'equip', 'error', 'explode', 'fire', 'gold', 'hit', 'hurt', 'kill', 'laser', 'latch', 'open', 'page', 'potion', 'shield', 'slash', 'slash2', 'step'];
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',
@@ -18,7 +18,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && /^(neondash|neonjump)-/.test(k)).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

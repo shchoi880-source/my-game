@@ -177,7 +177,7 @@ window.G = window.G || {};
   };
 
   // ===== 저장 =====
-  const KEY = 'neondash-save';
+  const KEY = 'neondash-save';  // 저장 키는 예전 이름 그대로(바꾸면 기록이 사라짐)
   const DEFAULT = () => ({ v: 1, sfx: true, music: true, haptics: true, practiceHint: false, totalAttempts: 0, totalJumps: 0, levels: {} });
   let data = DEFAULT();
   try {
@@ -185,9 +185,45 @@ window.G = window.G || {};
     if (raw && typeof raw === 'object' && raw.v === 1) data = Object.assign(DEFAULT(), raw);
     if (!data.levels || typeof data.levels !== 'object' || Array.isArray(data.levels)) data.levels = {};
   } catch (e) { /* 저장소 사용 불가 */ }
+  // ── 기록 보호: localStorage 외에 IndexedDB에도 같은 기록을 복사해 둠 ──
+  // localStorage가 비어 있으면(정리·저장소 분리 등) IndexedDB 복사본에서 되살린다.
+  const IDB = 'neonjump', STORE = 'kv';
+  const idb = cb => {
+    try {
+      if (typeof indexedDB === 'undefined') return;
+      const req = indexedDB.open(IDB, 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore(STORE); } catch (e) { /* 이미 있음 */ } };
+      req.onsuccess = () => { try { cb(req.result); } catch (e) { /* 무시 */ } };
+    } catch (e) { /* 미지원 */ }
+  };
+  const idbPut = json => idb(db => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(json, KEY); });
+  const hadLocal = (() => { try { return !!localStorage.getItem(KEY); } catch (e) { return false; } })();
+  const hasProgress = d => d && d.levels && Object.keys(d.levels).length > 0;
+  if (!hadLocal) {
+    idb(db => {
+      const r = db.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+      r.onsuccess = () => {
+        try {
+          const raw = r.result ? JSON.parse(r.result) : null;
+          if (raw && raw.v === 1 && hasProgress(raw) && !hasProgress(data)) {
+            Object.assign(data, DEFAULT(), raw);
+            try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* 무시 */ }
+          }
+        } catch (e) { /* 손상된 복사본 무시 */ }
+      };
+    });
+  } else {
+    try { idbPut(localStorage.getItem(KEY)); } catch (e) { /* 무시 */ }
+  }
+  // 브라우저에게 '이 사이트 데이터는 자동 정리하지 말아 달라'고 요청
+  G.requestPersist = () => { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* 미지원 */ } };
   G.save = {
     get data() { return data; },
-    persist() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* 무시 */ } },
+    persist() {
+      const json = JSON.stringify(data);
+      try { localStorage.setItem(KEY, json); } catch (e) { /* 무시 */ }
+      idbPut(json);
+    },
     level(id) {
       // 손상/구버전 저장 데이터 보정 (levels가 null/문자열, 항목 누락, coins 누락 등)
       if (!data.levels || typeof data.levels !== 'object' || Array.isArray(data.levels)) data.levels = {};

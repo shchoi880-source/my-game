@@ -1,6 +1,6 @@
 {
-  "name": "네온 대시 NEON DASH",
-  "short_name": "네온 대시",
+  "name": "네온 점프 NEON JUMP",
+  "short_name": "네온 점프",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

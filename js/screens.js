@@ -216,7 +216,7 @@
     ctx.beginPath(); ctx.arc(W / 2, H / 2 - 40, 120, -Math.PI * 0.85, -Math.PI * 0.55);
     ctx.strokeStyle = 'rgba(255,61,242,0.8)'; ctx.lineWidth = 4; ctx.stroke();
     R.glowText(ctx, '가로로 돌려주세요', W / 2, H / 2 + 110, 40, '#ffffff', { glow: 0.6 });
-    R.txt(ctx, 'NEON DASH 는 가로 화면 전용이에요', W / 2, H / 2 + 160, 18, 'rgba(255,255,255,0.6)', { weight: 600 });
+    R.txt(ctx, 'NEON JUMP 는 가로 화면 전용이에요', W / 2, H / 2 + 160, 18, 'rgba(255,255,255,0.6)', { weight: 600 });
     return true;
   }
 
@@ -390,7 +390,7 @@
       vignette(ctx, 0.6);
       const t = title.t, bt = R.beat({ bpm: 100 });
       // 로고 (글자별 낙하)
-      const word = 'NEON DASH', size = 92;
+      const word = 'NEON JUMP', size = 92;
       ctx.font = '900 ' + size + 'px ' + G.FONT;
       const total = ctx.measureText(word).width;
       let x = W / 2 - total / 2;
@@ -413,7 +413,7 @@
       }
       const sk = eoc((t - 0.8) / 0.5);
       ctx.globalAlpha = sk;
-      R.glowText(ctx, '「네온 대시」', W / 2, ly + 78, 30, '#ffffff', { glow: 0.4, weight: 800 });
+      R.glowText(ctx, '「네온 점프」', W / 2, ly + 78, 30, '#ffffff', { glow: 0.4, weight: 800 });
       ctx.fillStyle = 'rgba(255,61,242,0.9)'; ctx.fillRect(W / 2 - 150 * sk, ly + 104, 300 * sk, 2);
       ctx.globalAlpha = 1;
       // 터치해서 시작
@@ -1147,8 +1147,8 @@
     // 큐브
     g.save(); g.translate(960, 470); g.rotate(0); R.cube(g, 120, -0.2, 1, 1, { vy: 300 }); g.restore();
     // 글자
-    R.glowText(g, 'NEON DASH', 70, 78, 46, '#29f0ff', { align: 'left', glow: 0.7 });
-    R.txt(g, '「네온 대시」', 380, 80, 24, 'rgba(255,255,255,0.8)', { align: 'left', weight: 800 });
+    R.glowText(g, 'NEON JUMP', 70, 78, 46, '#29f0ff', { align: 'left', glow: 0.7 });
+    R.txt(g, '「네온 점프」', 380, 80, 24, 'rgba(255,255,255,0.8)', { align: 'left', weight: 800 });
     R.glowText(g, r.practice ? 'PRACTICE CLEAR' : 'LEVEL COMPLETE', 70, 170, 34, '#ffe14d', { align: 'left', glow: 0.7 });
     R.glowText(g, 'LV' + (r.level + 1) + '  ' + (lv.name || ''), 70, 235, 54, '#ffffff', { align: 'left', glow: 0.5 });
     stars(g, 70 + 5 * 13, 290, r.level + 1, 5, 24, DIFF_COL[Math.min(4, r.level)]);
@@ -1187,9 +1187,9 @@
   function shareCard() {
     const r = cp.r;
     if (!cp.card) prepareCard();
-    const name = 'neon-dash-' + ((levels()[r.level] || {}).id || 'lv') + '.png';
+    const name = 'neon-jump-' + ((levels()[r.level] || {}).id || 'lv') + '.png';
     const lvName = (levels()[r.level] || {}).name || '';
-    const text = 'NEON DASH 「' + lvName + '」 ' + r.attempts + '번 만에 클리어!' + (r.score ? ' 점수 ' + fmtNum(r.score) : '');
+    const text = 'NEON JUMP 「' + lvName + '」 ' + r.attempts + '번 만에 클리어!' + (r.score ? ' 점수 ' + fmtNum(r.score) : '');
     const doDownload = blob => {
       try {
         const a = document.createElement('a');
@@ -1205,7 +1205,7 @@
       if (blob && typeof File !== 'undefined' && navigator.share && navigator.canShare) {
         const file = new File([blob], name, { type: 'image/png' });
         if (navigator.canShare({ files: [file] })) {
-          navigator.share({ files: [file], title: 'NEON DASH', text }).catch(e => { if (!e || e.name !== 'AbortError') doDownload(blob); });
+          navigator.share({ files: [file], title: 'NEON JUMP', text }).catch(e => { if (!e || e.name !== 'AbortError') doDownload(blob); });
           return;
         }
       }

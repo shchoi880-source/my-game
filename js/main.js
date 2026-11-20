@@ -79,7 +79,9 @@
     if (document.fullscreenElement || !de.requestFullscreen) lock();
     else de.requestFullscreen({ navigationUI: 'hide' }).then(lock, () => {});
   };
+  let persistAsked = false;
   window.addEventListener('pointerup', e => {
+    if (!persistAsked) { persistAsked = true; G.requestPersist && G.requestPersist(); }
     if (e.pointerType !== 'mouse') { wakeAudio(); tryLandscape(); }
     const p = toLogical(e);
     if (scene && scene.up) scene.up(p.x, p.y, e);
@@ -122,7 +124,7 @@
       const W = G.W, H = G.H;
       ctx.fillStyle = '#070a1c';
       ctx.fillRect(0, 0, W, H);
-      G.text('NEON DASH', W / 2, H / 2 - 30, 48, '#29f0ff');
+      G.text('NEON JUMP', W / 2, H / 2 - 30, 48, '#29f0ff');
       ctx.fillStyle = 'rgba(255,255,255,0.15)'; G.rr(W / 2 - 160, H / 2 + 30, 320, 10, 5); ctx.fill();
       ctx.fillStyle = '#29f0ff'; G.rr(W / 2 - 160, H / 2 + 30, Math.max(10, 320 * boot.progress), 10, 5); ctx.fill();
     }
