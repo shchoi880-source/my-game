@@ -68,7 +68,8 @@
    *   toast(c, text, value, {t, life=1.64, x, y, color=mint, w, tilt=-3}) slide in 220 ms, hold, slide out
    *   popup(c, text, x, y, k, {color=sun, size=30})   score popup: rises 36 px, fades in last 200 ms
    *   shield(c, x, y, on, size=30) · spark(c, x, y, R, color)
-   *   ship(c, x, y, {scale=1, rot, flame, eyeScale, look:{x,y}, alpha})       BLIP (eye = hitbox)
+   *   ship(c, x, y, {scale=1, rot, flame, eyeScale, look:{x,y}, alpha, body, fin})  BLIP (eye = hitbox);
+   *                        body/fin = skin colours (G.shipSkin is applied to the in-game BLIP)
    *   boss(c, x, y, {scale=1, t, look:{x,y}, chips=8, squash, sleepy, broken}) JAMMER
    *   bg(c, {kind:'title'|'results'|'arena', rays:{x,y}|false, x0, w})
    */
@@ -2385,6 +2386,7 @@
       alpha,
       look: { x: (p.vx || 0) / Math.max(l, 200), y: (p.vy || 0) / Math.max(l, 200) },
       rot: clamp((p.vx || 0) / 40, -8, 8),
+      ...(G.shipSkin || {}), // equipped skin {body, fin} (set by screens.js)
     });
     if (focus || inv) {
       // hitbox stays fully opaque: the pupil
