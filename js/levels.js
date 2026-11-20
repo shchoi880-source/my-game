@@ -423,7 +423,7 @@
   // ───────────── 하드 모드 ─────────────
   // 같은 맵을 tscale배 빠르게: 속도·BPM·중력·점프가 모두 비례 → 점프 궤적은 노말과 같고
   // 반응 시간만 짧아진다(노말에서 깰 수 있는 길은 하드에서도 그대로 존재).
-  const HARD_SCALE = { lv1: 1.3, lv2: 1.3, lv3: 1.25, lv4: 1.15, lv5: 1.15 };
+  const HARD_SCALE = { lv1: 1.3, lv2: 1.3, lv3: 1.25, lv4: 1.2, lv5: 1.15 };
   const hardCache = {};
   G.HARD_SCALE = HARD_SCALE;
   G.hardLevel = lv => {
