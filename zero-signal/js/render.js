@@ -2343,7 +2343,7 @@
       c.lineWidth = 3;
       c.strokeStyle = C.sky;
       c.beginPath();
-      c.arc(0, 0, Math.max(40, p.graze || 27), 0, TAU);
+      c.arc(0, 0, p.graze || 27, 0, TAU);
       c.stroke();
       c.restore();
     }
@@ -2355,7 +2355,7 @@
       c.lineWidth = 3;
       c.strokeStyle = C.cream;
       c.beginPath();
-      c.arc(0, 0, focus ? 46 : 40, 0, TAU);
+      c.arc(0, 0, (p.graze || 27) + (focus ? 3 : 0), 0, TAU);
       c.stroke();
       c.restore();
     }
@@ -2367,7 +2367,7 @@
       c.lineWidth = 8;
       c.strokeStyle = C.ink;
       c.beginPath();
-      c.arc(0, 2, 34, -Math.PI / 2, -Math.PI / 2 + TAU * f);
+      c.arc(0, 2, 26, -Math.PI / 2, -Math.PI / 2 + TAU * f);
       c.stroke();
       c.lineWidth = 4;
       c.strokeStyle = C.sky;
@@ -2379,8 +2379,9 @@
       l = Math.hypot(p.vx || 0, p.vy || 0) || 1;
     // i-frames: calm translucency with a slow (1.5 Hz) breathing, well under the 2 Hz comfort limit
     const alpha = inv ? 0.55 + (still ? 0 : 0.15 * Math.sin(t * TAU * 1.5)) : 1;
+    // 기체는 작게(판정이 아닌 장식), 실제 판정은 가운데 점 하나 — 탄막 게임 관례
     ship(c, p.x, p.y, {
-      scale: 1.08,
+      scale: 0.62,
       flame,
       eyeScale: focus ? 1.15 : 1,
       alpha,
@@ -2388,15 +2389,22 @@
       rot: clamp((p.vx || 0) / 40, -8, 8),
       ...(G.shipSkin || {}), // equipped skin {body, fin} (set by screens.js)
     });
-    if (focus || inv) {
-      // hitbox stays fully opaque: the pupil
+    {
+      // 판정 점: 항상 표시. 이 점에 닿을 때만 실드가 깎인다(기체 그림은 판정 아님)
+      const hr = p.hit || 5;
       c.save();
       c.beginPath();
-      c.arc(p.x, p.y, (p.hit || 5) - 0.4, 0, TAU);
+      c.arc(p.x, p.y, hr + 3.5, 0, TAU);
       c.fillStyle = C.ink;
       c.fill();
+      c.beginPath();
+      c.arc(p.x, p.y, hr, 0, TAU);
+      c.fillStyle = '#ffffff';
+      c.fill();
       c.lineWidth = 2;
-      c.strokeStyle = C.cream;
+      c.strokeStyle = focus ? C.pink || '#ff5fa2' : C.sky;
+      c.beginPath();
+      c.arc(p.x, p.y, hr + 5.5, 0, TAU);
       c.stroke();
       c.restore();
     }

@@ -1082,6 +1082,7 @@
       c.restore();
       const hint = this.tut ? '처음이라면 아래 안내를 따라 해보세요' : G.isTouch() ? '왼쪽: 이동 · 오른쪽: 대시 / 집중(누르고 있기)' : '탄환에 스치면 FLOW가 오릅니다';
       U.chip(c, 640, 520, hint, { color: C.ink, size: 16, h: 40, align: 'center', sh: 0, sheen: false });
+      U.chip(c, 640, 570, '기체 가운데 하얀 점에 맞을 때만 실드가 깎여요', { color: C.ink, size: 15, h: 36, align: 'center', sh: 0, sheen: false });
     },
     // run HUD: sector chip + progress, shards, perk icons
     runHud(c) {
