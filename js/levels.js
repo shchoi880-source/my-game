@@ -499,7 +499,7 @@
     objects.sort((a, b) => a.x - b.x || (a.t < b.t ? -1 : 1));
     const h = Object.assign({}, lv, {
       id: lv.id + 'h', baseId: lv.id, hard: true, tscale: k, baseCount: lv.objects.length,
-      spikeScale: 0.8, sawScale: 0.95, hurtInset: 1,
+      spikeScale: 0.75, sawScale: 0.9, hurtInset: 2,
       speed: lv.speed * k, bpm: lv.bpm * k, objects, extraCount: extras.length,
       name: lv.name,
     });
