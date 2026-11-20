@@ -449,6 +449,9 @@
     const spans = [];
     for (const o of lv.objects) { const e = extent(o); if (e) spans.push(e); }
     const free = (x0, x1) => { for (const e of spans) if (e[1] > x0 && e[0] < x1) return false; return true; };
+    // 천장(공중 블록) 구간 바로 앞에는 넣지 않음: 착지 직후 낮은 통로로 들어가면 타이밍이 너무 빡빡해짐
+    const ceil = lv.objects.filter(o => o.t === 'block' && o.y > 0).map(o => o.x);
+    const nearCeil = (x0, x1) => ceil.some(cx => cx >= x0 && cx < x1);
     const out = [];
     let n = 0, nextB = 8;
     const endB = lv.length / B - 4;
@@ -457,7 +460,7 @@
       const cnt = cfg.pat[n % cfg.pat.length];
       const x = Math.round(b * B * 10) / 10, w = cnt * SW;
       // 도약 구간(앞 1.3박) + 착지 구간(뒤 1.8박)이 모두 빈 땅일 때만
-      if (!free(x - B * 1.1, x + w + B * 1.5)) continue;
+      if (!free(x - B * 1.1, x + w + B * 1.5) || nearCeil(x - B * 0.5, x + w + B * 3)) continue;
       for (let i = 0; i < cnt; i++) out.push({ t: 'spike', x: x + i * SW, y: 0, w: SW, h: SW, dir: 'up', extra: true });
       spans.push([x, x + w]);
       n++; nextB = b + cfg.every;
@@ -476,7 +479,7 @@
       // 이 묶음 자신은 빼고 검사
       const others = spans.filter(e => !(e[0] >= g.x0 - 0.5 && e[1] <= nx + 0.5));
       let ok = true; for (const e of others) if (e[1] > nx && e[0] < nx + SW + B * 1.5) { ok = false; break; }
-      if (!ok) continue;
+      if (!ok || nearCeil(nx - B * 0.5, nx + SW + B * 3)) continue;
       ext.push({ t: 'spike', x: nx, y: 0, w: SW, h: SW, dir: 'up', extra: true });
       spans.push([nx, nx + SW]);
     }
