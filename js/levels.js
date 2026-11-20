@@ -421,27 +421,90 @@
   G.LEVELS = LEVELS;
 
   // ───────────── 하드 모드 ─────────────
-  // 같은 맵을 tscale배 빠르게: 속도·BPM·중력·점프가 모두 비례 → 점프 궤적은 노말과 같고
-  // 반응 시간만 짧아진다(노말에서 깰 수 있는 길은 하드에서도 그대로 존재).
+  // 1) 같은 맵을 tscale배 빠르게: 속도·BPM·중력·점프가 모두 비례 → 점프 궤적은 노말과 같고 반응 시간만 짧아짐
+  // 2) 노말에서 장애물 없이 달리던 평지 구간에 박자에 맞춰 가시를 추가(쉬는 구간 없이 계속 점프)
+  //    앞뒤로 충분한 빈 땅이 있는 곳에만 넣어서 항상 넘을 수 있게 한다. tools/verify.js --hard 로 검증.
   const HARD_SCALE = { lv1: 1.3, lv2: 1.3, lv3: 1.25, lv4: 1.2, lv5: 1.15 };
+  // 레벨별 추가 가시 패턴(가시 개수 순환)과 최소 간격(박)
+  const HARD_EXTRA = {
+    lv1: { grow: 2, pat: [1, 2], every: 2 },
+    lv2: { grow: 2, pat: [1, 2, 1], every: 2 },
+    lv3: { grow: 2, pat: [2, 1, 2], every: 2 },
+    lv4: { grow: 1, pat: [2, 1], every: 2 },
+    lv5: { grow: 1, pat: [1, 2], every: 2.5 },
+  };
   const hardCache = {};
   G.HARD_SCALE = HARD_SCALE;
+  function extent(o) {
+    if (o.t === 'gem' || o.t === 'coin') return null;     // 먹는 것은 장애물 아님
+    if (o.t === 'saw') { const r = (o.r || 30) + Math.abs(o.ax || 0); return [o.x - r, o.x + r]; }
+    if (o.t === 'orb') return [o.x - 26, o.x + 26];
+    if (o.t === 'pad') return [o.x, o.x + 40];
+    return [o.x, o.x + (o.w || 40)];
+  }
+  function hardExtras(lv) {
+    const cfg = HARD_EXTRA[lv.id];
+    if (!cfg) return [];
+    const B = lv.speed * 60 / lv.bpm;
+    const spans = [];
+    for (const o of lv.objects) { const e = extent(o); if (e) spans.push(e); }
+    const free = (x0, x1) => { for (const e of spans) if (e[1] > x0 && e[0] < x1) return false; return true; };
+    const out = [];
+    let n = 0, nextB = 8;
+    const endB = lv.length / B - 4;
+    for (let b = 8; b <= endB; b += 0.5) {
+      if (b < nextB) continue;
+      const cnt = cfg.pat[n % cfg.pat.length];
+      const x = Math.round(b * B * 10) / 10, w = cnt * SW;
+      // 도약 구간(앞 1.3박) + 착지 구간(뒤 1.8박)이 모두 빈 땅일 때만
+      if (!free(x - B * 1.1, x + w + B * 1.5)) continue;
+      for (let i = 0; i < cnt; i++) out.push({ t: 'spike', x: x + i * SW, y: 0, w: SW, h: SW, dir: 'up', extra: true });
+      spans.push([x, x + w]);
+      n++; nextB = b + cfg.every;
+    }
+    // 기존 가시 묶음(지면, 1~2개)을 한 칸 늘림: 뒤쪽 착지 공간이 비어 있을 때만
+    const grp = [];
+    const ups = lv.objects.filter(o => o.t === 'spike' && (o.dir || 'up') === 'up' && !(o.y > 0)).sort((a, b) => a.x - b.x);
+    for (let i = 0; i < ups.length;) {
+      let j = i; while (j + 1 < ups.length && Math.abs(ups[j + 1].x - ups[j].x - SW) < 0.5) j++;
+      grp.push({ x0: ups[i].x, n: j - i + 1 }); i = j + 1;
+    }
+    const ext = [];
+    for (const g of grp) {
+      if (g.n > cfg.grow) continue;
+      const nx = g.x0 + g.n * SW;
+      // 이 묶음 자신은 빼고 검사
+      const others = spans.filter(e => !(e[0] >= g.x0 - 0.5 && e[1] <= nx + 0.5));
+      let ok = true; for (const e of others) if (e[1] > nx && e[0] < nx + SW + B * 1.5) { ok = false; break; }
+      if (!ok) continue;
+      ext.push({ t: 'spike', x: nx, y: 0, w: SW, h: SW, dir: 'up', extra: true });
+      spans.push([nx, nx + SW]);
+    }
+    return out.concat(ext);
+  }
   G.hardLevel = lv => {
     if (!lv || lv.hard) return lv;
-    if (hardCache[lv.id] && hardCache[lv.id].objects.length === lv.objects.length) return hardCache[lv.id];
+    const c0 = hardCache[lv.id];
+    if (c0 && c0.baseCount === lv.objects.length && c0.tscale === (HARD_SCALE[lv.id] || 1.25)) return c0;
     const k = HARD_SCALE[lv.id] || 1.25;
-    const objects = lv.objects.map(o => {
+    const extras = hardExtras(lv);
+    // 추가 가시와 겹치는 낮은 젬은 치움(가시 위에 먹이가 겹쳐 보이지 않게)
+    const hit = o => o.t === 'gem' && o.y < 90 && extras.some(e => o.x > e.x - 30 && o.x < e.x + e.w + 30);
+    const objects = lv.objects.filter(o => !hit(o)).map(o => {
       const c = Object.assign({}, o);
       if (c.t === 'saw' && c.period) c.period = +(c.period / k).toFixed(4);
       delete c._gi;
       return c;
-    });
+    }).concat(extras);
+    objects.sort((a, b) => a.x - b.x || (a.t < b.t ? -1 : 1));
     const h = Object.assign({}, lv, {
-      id: lv.id + 'h', baseId: lv.id, hard: true, tscale: k,
-      speed: lv.speed * k, bpm: lv.bpm * k, objects,
+      id: lv.id + 'h', baseId: lv.id, hard: true, tscale: k, baseCount: lv.objects.length,
+      spikeScale: 0.8, sawScale: 0.95, hurtInset: 1,
+      speed: lv.speed * k, bpm: lv.bpm * k, objects, extraCount: extras.length,
       name: lv.name,
     });
     hardCache[lv.id] = h;
     return h;
   };
+
 })();

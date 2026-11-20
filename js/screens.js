@@ -535,7 +535,7 @@
     // 난이도
     const dc = sel.hard ? HARD_COL : DIFF_COL[Math.min(4, i)];
     stars(ctx, w / 2, 130, i + 1, 5, 18, dc);
-    R.txt(ctx, sel.hard ? 'HARD · 속도 ×' + ((G.HARD_SCALE && G.HARD_SCALE[lv.id]) || 1.25) : DIFF[Math.min(4, i)], w / 2, 154, 14, dc, { weight: 900, stroke: 3 });
+    R.txt(ctx, sel.hard ? 'HARD · 속도×' + ((G.HARD_SCALE && G.HARD_SCALE[lv.id]) || 1.25) + ' · 가시+' + ((G.hardLevel && G.hardLevel(lv).extraCount) || 0) : DIFF[Math.min(4, i)], w / 2, 154, 14, dc, { weight: 900, stroke: 3 });
     // 최고 %
     const best = sel.practice ? (sv.practiceBest || 0) : (sv.best || 0);
     num(ctx, best + '%', w / 2, 192, 36, sel.practice ? '#5dff7a' : '#ffffff', { weight: 900, glow: 0.5 });

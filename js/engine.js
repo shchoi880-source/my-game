@@ -35,14 +35,14 @@
   }
 
   // 가시 판정 삼각형(축소) + SAT 축 미리 계산
-  function prepSpike(c) {
+  function prepSpike(c, sk) {
     const w = c.w || 40, h = c.h || 40, x = c.x, y = c.y || 0, d = c.dir || 'up';
     let v;
     if (d === 'down') v = [x, y + h, x + w, y + h, x + w / 2, y];
     else if (d === 'left') v = [x + w, y, x + w, y + h, x, y + h / 2];
     else if (d === 'right') v = [x, y, x, y + h, x + w, y + h / 2];
     else v = [x, y, x + w, y, x + w / 2, y + h];
-    const gx = (v[0] + v[2] + v[4]) / 3, gy = (v[1] + v[3] + v[5]) / 3, k = PHYS.spikeScale;
+    const gx = (v[0] + v[2] + v[4]) / 3, gy = (v[1] + v[3] + v[5]) / 3, k = sk || PHYS.spikeScale;
     for (let i = 0; i < 6; i += 2) { v[i] = gx + (v[i] - gx) * k; v[i + 1] = gy + (v[i + 1] - gy) * k; }
     // axes: x, y, 3 edge normals → 각 축마다 [nx, ny, triMin, triMax]
     const ax = new Float64Array(20);
@@ -84,6 +84,8 @@
   // 레벨 오브젝트 → 런 전용 복사본 + x 정렬 + 구멍 병합
   function prep(level) {
     const src = level.objects || [];
+    // 하드 모드는 판정을 더 엄격하게(레벨에 spikeScale/sawScale 지정 시)
+    const SK = level.spikeScale || PHYS.spikeScale, SWS = level.sawScale || PHYS.sawScale;
     const objects = [], list = [], gapsRaw = [], gems = [];
     let coinIdx = 0;
     for (let i = 0; i < src.length; i++) {
@@ -97,9 +99,9 @@
       c._k = k;
       const y = c.y || 0;
       if (k === K_BLOCK) { c._x1 = c.x + c.w; c._top = y + c.h; c._y0 = y; c._xMin = c.x; c._xMax = c._x1; }
-      else if (k === K_SPIKE) { prepSpike(c); c._xMin = c.x; c._xMax = c.x + (c.w || 40); }
+      else if (k === K_SPIKE) { prepSpike(c, SK); c._xMin = c.x; c._xMax = c.x + (c.w || 40); }
       else if (k === K_SAW) {
-        c.r = c.r || 30; c._hr = c.r * PHYS.sawScale;
+        c.r = c.r || 30; c._hr = c.r * SWS;
         const p = sawPos(c, 0); c.cx = p.x; c.cy = p.y;
         c._xMin = c.x - Math.abs(c.ax || 0) - c.r; c._xMax = c.x + Math.abs(c.ax || 0) + c.r;
       }
@@ -140,6 +142,7 @@
     const JUMP_V = PHYS.jumpV * k, ORB_V = PHYS.orbV * k, DJUMP_V = PHYS.djumpV * k, PAD_V = PHYS.padV * k;
     const GRAV = PHYS.gravity * k * k, MAX_FALL = PHYS.maxFall * k, ROT_SPEED = PHYS.rotSpeed * k;
     const COYOTE = PHYS.coyote / k, BUFFER = PHYS.buffer / k;
+    const HURT = level.hurtInset != null ? level.hurtInset : PHYS.hurtInset;
     const quiet = !!opts.quiet;
     const near = new Uint8Array(n);
     const events = [];
@@ -306,7 +309,7 @@
 
       // --- 위험물 / 블록 충돌 / 코인 ---
       if (!s.done) {
-        const y = s.y, hi0 = PHYS.hurtInset;
+        const y = s.y, hi0 = HURT;
         const hx0 = x + hi0, hx1 = x + S - hi0, hy0 = y + hi0, hy1 = y + S - hi0;
         for (let i = lo; i <= hi; i++) {
           const o = list[i], k = o._k;
