@@ -18,6 +18,7 @@ const CORE = [
   './js/audio.js',
   './js/patterns.js',
   './js/engine.js',
+  './js/run.js',
   './js/render.js',
   './js/screens.js',
   './js/main.js',

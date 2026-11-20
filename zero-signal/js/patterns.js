@@ -253,17 +253,53 @@
   // Layered timeline: base layer (whole run, low rate) + section feature layer + pressure layer from section 3.
   // Inside a section the feature rate ramps 0.7x -> 1.3x, then drops to 0.4x for the last 2s (breather).
   // The boss (last section) is data: spell cards whose emitters the engine runs (HP-driven, see engine.js).
-  G.makeTimeline = (m, mode = 'normal') => {
-    const md0 = G.modeOf(mode),
-      md = { ...md0, dens: md0.dens * ((m.densMul && m.densMul[md0.id]) || 1) },
-      d = m.difficulty,
-      D = m.duration,
-      bossStart = +(D * 0.75).toFixed(3),
-      secT = [0, 0.19, 0.38, 0.57].map((f) => +(f * D).toFixed(3)).concat(bossStart),
-      events = [];
+  //
+  // G.makeTimeline(m, mode, o = {}) — with o = {} (every mission) the output is unchanged.
+  // SIGNAL RUN sector options (see G.SECTORS / js/run.js):
+  //   o.features ['fan'|'spiral'|'wall'|'rain', ...]  feature layers for the whole sector (no fixed sections)
+  //   o.laser / o.pressure  extra laser lane layer / spiral pressure layer
+  //   o.boss === false      no boss (bossStart = Infinity, spells = [])   (implied by o.features)
+  //   o.bossOnly            boss fight from t = 2s (3 spell cards + final '제로 시그널')
+  //   o.elite               sector ends with a 14s mini-boss card (Depth 7)
+  //   o.densMul, o.speedMul, o.teleDelta, o.bossHpMul, o.hardSpells (depth rules), o.name (section name)
+  const spellCards = (md, d, sp) => {
+    const ev = (every) => +(every / md.dens).toFixed(3);
+    return {
+      petal: {
+        name: '공명 꽃잎',
+        emit: [
+          { type: 'petal', every: ev(1.3 - d * 0.1), opt: { n: 7 + d * 2, speed: sp(110 + d * 10), spin: 0.6, curve: 0.4, color: '#ffd166' } },
+          { type: 'fan', every: ev(2.4 - d * 0.2), opt: { n: 3, speed: sp(150 + d * 10), spread: 0.4, color: '#4deeea' } },
+        ],
+      },
+      grid: {
+        name: '격자 붕괴',
+        emit: [
+          { type: 'laser', every: ev(1.7 - d * 0.15), opt: { count: d >= 2 ? 3 : 2, spread: 0.55, speed: sp(320), tele: md.laserTele, color: '#ff5c8a' } },
+          { type: 'ring', every: ev(2.0 - d * 0.2), opt: { n: 8 + d * 2, speed: sp(105 + d * 10), spin: 0.5, color: '#4b8cff' } },
+        ],
+      },
+      conv: {
+        name: '영점 수렴',
+        emit: [
+          { type: 'converge', every: ev(2.0 - d * 0.2), opt: { n: 14 + d * 4, speed: sp(105 + d * 8), color: '#a66cff' } },
+          { type: 'spiral', every: ev(0.75 - d * 0.08), opt: { arms: 2 + d, speed: sp(115 + d * 8), curve: 0.14, spin: 1.3, color: '#ffd166' } },
+        ],
+      },
+      final: {
+        name: '제로 시그널',
+        final: true,
+        emit: [
+          { type: 'petal', every: ev(1.5 - d * 0.1), opt: { n: 6 + d * 2, speed: sp(120 + d * 10), spin: 0.8, curve: 0.35, color: '#ff5c8a' } },
+          { type: 'fan', every: ev(1.8 - d * 0.2), opt: { n: 3 + d * 2, speed: sp(160 + d * 10), spread: 0.7, color: '#4deeea' } },
+          { type: 'converge', every: ev(3.4 - d * 0.3), opt: { n: 10 + d * 4, speed: sp(110), color: '#a66cff' } },
+        ],
+      },
+    };
+  };
+  const makeLayer = (events, md) => {
     let idx = 0;
-    const sp = (s) => +(s * md.speed).toFixed(1);
-    const layer = (t0, t1, every, type, opt, cfg = {}) => {
+    return (t0, t1, every, type, opt, cfg = {}) => {
       const ramp = cfg.ramp !== false;
       let t = t0 + (cfg.start || 0);
       while (t < t1 - 0.05) {
@@ -275,6 +311,83 @@
         t += every / (r * md.dens);
       }
     };
+  };
+  // Sector tuning knobs (tools/balance.js --run). fw = interval factor for each of the 2 overlapping features.
+  G.SECTOR_TUNE = { fw: 1, fan: 1.7, spiral: 1.2, wall: 1.4, rain: 1.4, laserEvery: 3.6, pressureEvery: 2.4, eliteHp: 30 };
+  const sectorTimeline = (m, mode, o) => {
+    const md0 = G.modeOf(mode),
+      md = { ...md0, dens: md0.dens * (o.densMul || 1), speed: md0.speed * (o.speedMul || 1) },
+      d = m.difficulty,
+      D = m.duration,
+      T = G.SECTOR_TUNE,
+      events = [],
+      layer = makeLayer(events, md),
+      sp = (s) => +(s * md.speed).toFixed(1),
+      R = Math.round,
+      fw = T.fw,
+      laserTele = Math.max(0.3, md.laserTele + (o.teleDelta || 0));
+    let bossStart = Infinity,
+      spells = [],
+      bossHp = 0;
+    const end = o.bossOnly ? 0 : o.elite ? D - 14 : D;
+    if (!o.bossOnly) {
+      layer(2.5, end, (3.4 - d * 0.4) * 1.15, 'ring', { n: R(6 + 2 * d), speed: sp(95 + d * 8), spin: 0.37, color: '#5a6b9c' }, { ramp: false });
+      const F = {
+        fan: () => layer(1.2, end, (1.5 - d * 0.12) * fw * T.fan, 'fan', { n: R(3 + d) + (d > 1 ? 1 : 0), speed: sp(125 + d * 12), spread: 0.45 + d * 0.18, color: '#4deeea' }, { warn: true }),
+        spiral: () => layer(1.5, end, (0.62 - d * 0.06) * fw * T.spiral, 'spiral', { arms: R(1.5 + d), speed: sp(125 + d * 12), color: '#a66cff', curve: 0.16, spin: 1.5 }),
+        wall: () => layer(2, end, (3.0 - d * 0.15) * fw * T.wall, 'wall', { speed: sp(130 + d * 14), color: '#4b8cff', step: R(66 - d * 4) }, { warn: true }),
+        rain: () => layer(1.5, end, (1.25 - d * 0.1) * fw * T.rain, 'rain', { volley: R(3 + d), speed: sp(175 + d * 15), color: '#ff5c8a' }),
+      };
+      for (const f of o.features || []) if (F[f]) F[f]();
+      if (o.laser)
+        layer(4, end, T.laserEvery - d * 0.3, 'laser', { count: d >= 2.5 ? 2 : 1, spread: 0.6, speed: sp(300), tele: laserTele, color: '#ff5c8a' });
+      if (o.pressure)
+        layer(3, end, T.pressureEvery - d * 0.2, 'spiral', { arms: R(d), speed: sp(110 + d * 8), color: '#a66cff', curve: 0.12, spin: 1.1 });
+      events.sort((a, b) => a.t - b.t || a.opt.index - b.opt.index);
+    }
+    const mdS = o.hardSpells
+        ? { ...md, dens: md.dens * G.MODES.hard.dens * 0.85, speed: md.speed * G.MODES.hard.speed, laserTele: G.MODES.hard.laserTele }
+        : { ...md, laserTele },
+      spS = (s) => +(s * mdS.speed).toFixed(1),
+      di = R(d),
+      C = spellCards(mdS, di, spS);
+    if (o.bossOnly) {
+      bossStart = 2;
+      const cards = [C.petal, C.grid, C.conv],
+        finalLen = 10,
+        cardLen = +((D - bossStart - finalLen) / cards.length).toFixed(3);
+      spells = cards.map((c) => ({ ...c, dur: cardLen }));
+      spells.push(C.final);
+      bossHp = Math.round((m.bossHp || 100) * md.hp * (o.bossHpMul || 1));
+    } else if (o.elite) {
+      bossStart = end;
+      spells = [{ ...C.grid, name: '정예 격자', final: true }];
+      bossHp = Math.round(T.eliteHp * (o.bossHpMul || 1));
+    }
+    const sections = [{ t: 0, name: o.name || m.name }];
+    if (o.elite) sections.push({ t: bossStart, name: '정예 코어' });
+    return {
+      mode: md.id,
+      events,
+      bossStart,
+      bossHp,
+      spells,
+      afterglow: { type: 'ring', every: 1.8, opt: { n: 8, speed: sp(100), spin: 0.4, color: '#5a6b9c' } },
+      sections,
+      sector: true,
+    };
+  };
+  G.makeTimeline = (m, mode = 'normal', o = {}) => {
+    if (o.features || o.bossOnly || o.boss === false) return sectorTimeline(m, mode, o);
+    const md0 = G.modeOf(mode),
+      md = { ...md0, dens: md0.dens * ((m.densMul && m.densMul[md0.id]) || 1) },
+      d = m.difficulty,
+      D = m.duration,
+      bossStart = +(D * 0.75).toFixed(3),
+      secT = [0, 0.19, 0.38, 0.57].map((f) => +(f * D).toFixed(3)).concat(bossStart),
+      events = [],
+      layer = makeLayer(events, md);
+    const sp = (s) => +(s * md.speed).toFixed(1);
     const [s0, s1, s2, s3] = secT;
     // base ambient ring for the whole pre-boss run
     layer(2.5, bossStart, 3.4 - d * 0.4, 'ring', { n: 6 + 2 * d, speed: sp(95 + d * 8), spin: 0.37, color: '#5a6b9c' }, { ramp: false });
@@ -292,41 +405,12 @@
     events.sort((a, b) => a.t - b.t || a.opt.index - b.opt.index);
 
     // Boss spell cards. `every` is already divided by mode density.
-    const ev = (every) => +(every / md.dens).toFixed(3);
-    const petal = {
-      name: '공명 꽃잎',
-      emit: [
-        { type: 'petal', every: ev(1.3 - d * 0.1), opt: { n: 7 + d * 2, speed: sp(110 + d * 10), spin: 0.6, curve: 0.4, color: '#ffd166' } },
-        { type: 'fan', every: ev(2.4 - d * 0.2), opt: { n: 3, speed: sp(150 + d * 10), spread: 0.4, color: '#4deeea' } },
-      ],
-    };
-    const grid = {
-      name: '격자 붕괴',
-      emit: [
-        { type: 'laser', every: ev(1.7 - d * 0.15), opt: { count: d >= 2 ? 3 : 2, spread: 0.55, speed: sp(320), tele: md.laserTele, color: '#ff5c8a' } },
-        { type: 'ring', every: ev(2.0 - d * 0.2), opt: { n: 8 + d * 2, speed: sp(105 + d * 10), spin: 0.5, color: '#4b8cff' } },
-      ],
-    };
-    const conv = {
-      name: '영점 수렴',
-      emit: [
-        { type: 'converge', every: ev(2.0 - d * 0.2), opt: { n: 14 + d * 4, speed: sp(105 + d * 8), color: '#a66cff' } },
-        { type: 'spiral', every: ev(0.75 - d * 0.08), opt: { arms: 2 + d, speed: sp(115 + d * 8), curve: 0.14, spin: 1.3, color: '#ffd166' } },
-      ],
-    };
-    const cards = d === 1 ? [petal, grid] : [petal, grid, conv];
+    const C = spellCards(md, d, sp);
+    const cards = d === 1 ? [C.petal, C.grid] : [C.petal, C.grid, C.conv];
     const finalLen = d === 1 ? 6 : 8,
       cardLen = +((D - bossStart - finalLen) / cards.length).toFixed(3);
     const spells = cards.map((c) => ({ ...c, dur: cardLen }));
-    spells.push({
-      name: '제로 시그널',
-      final: true,
-      emit: [
-        { type: 'petal', every: ev(1.5 - d * 0.1), opt: { n: 6 + d * 2, speed: sp(120 + d * 10), spin: 0.8, curve: 0.35, color: '#ff5c8a' } },
-        { type: 'fan', every: ev(1.8 - d * 0.2), opt: { n: 3 + d * 2, speed: sp(160 + d * 10), spread: 0.7, color: '#4deeea' } },
-        { type: 'converge', every: ev(3.4 - d * 0.3), opt: { n: 10 + d * 4, speed: sp(110), color: '#a66cff' } },
-      ],
-    });
+    spells.push(C.final);
     return {
       mode: md.id,
       events,
@@ -343,7 +427,6 @@
       ],
     };
   };
-
   // ---- grading (pure data helpers, used by screens.js) ----
   const ORDER = ['D', 'C', 'B', 'A', 'S', 'SS'];
   G.GRADE_ORDER = ORDER;
@@ -379,5 +462,177 @@
     if (g === 'S') return '대시 없이 무피격이면 SS';
     if (!s.bossBroken) return '코어 HP를 모두 깎아 격파하기';
     return mode === 'hard' ? '완벽한 신호. 점수 갱신에 도전' : 'HARD 모드에 도전';
+  };
+  // ---- SIGNAL RUN data (pure; js/run.js drives it) --------------------------------
+  // Sectors of one run. diff = makeTimeline difficulty; pick = how many features are drawn from `pool`
+  // (`fixed` ones always included). densMul trims density (like mission densMul). After sectors 1-4 comes a draft; after sector 3 also the cache (shop).
+  G.SECTORS = [
+    { name: '수신', dur: 40, diff: 1.0, fixed: ['fan'], pool: ['spiral', 'wall'], pick: 1, color: '#4deeea' },
+    { name: '간섭', dur: 45, diff: 1.5, fixed: [], pool: ['fan', 'spiral', 'wall', 'rain'], pick: 2, color: '#a66cff' },
+    { name: '균열', dur: 50, diff: 2.0, fixed: [], pool: ['fan', 'spiral', 'wall', 'rain'], pick: 2, laser: true, color: '#4b8cff' },
+    { name: '폭풍', dur: 55, diff: 2.5, fixed: [], pool: ['fan', 'spiral', 'wall', 'rain'], pick: 2, pressure: true, densMul: 0.85, color: '#ff5c8a' },
+    { name: '코어', dur: 70, diff: 3.0, boss: true, bossHp: 140, densMul: 0.75, color: '#ffd166' },
+  ];
+  G.FEATURE_NAMES = { fan: '부채꼴', spiral: '나선', wall: '차단벽', rain: '폭우', laser: '레이저', pressure: '압박' };
+
+  // Depth (ascension) rules — cumulative. Clearing Depth N unlocks N+1.
+  G.DEPTHS = [
+    { n: 0, name: '기본', desc: '규칙 없음' },
+    { n: 1, name: '밀도 상승', desc: '탄막 밀도 +8%' },
+    { n: 2, name: '희귀 신호 감소', desc: '희귀 이상 카드 확률 −5%p' },
+    { n: 3, name: '수리 없음', desc: '2섹터 후 보호막 수리 없음' },
+    { n: 4, name: '가속', desc: '탄속 +6%' },
+    { n: 5, name: '짧은 경고', desc: '레이저 경고 −0.08초' },
+    { n: 6, name: '강화 코어', desc: '코어 HP +20%' },
+    { n: 7, name: '정예 섹터', desc: '3섹터 끝에 정예 코어' },
+    { n: 8, name: '얇은 장갑', desc: '보호막 2개로 시작' },
+    { n: 9, name: '비싼 캐시', desc: '캐시 가격 +50%' },
+    { n: 10, name: '제로 시그널', desc: 'HARD 스펠 카드' },
+  ];
+  G.depthRules = (n) => {
+    n = Math.max(0, Math.min(10, n | 0));
+    return {
+      depth: n,
+      densMul: n >= 1 ? 1.08 : 1,
+      rarityRPenalty: n >= 2 ? 5 : 0,
+      repair: n < 3,
+      speedMul: n >= 4 ? 1.06 : 1,
+      teleDelta: n >= 5 ? -0.08 : 0,
+      bossHpMul: n >= 6 ? 1.2 : 1,
+      elite: n >= 7,
+      shields0: n >= 8 ? 2 : 3,
+      cacheMul: n >= 9 ? 1.5 : 1,
+      hardSpells: n >= 10,
+    };
+  };
+
+  // Perks. rar C/R/E/L/G(glitch). tag GRAZE/DASH/FLOW/CORE (3 of a tag = resonance). stack = max copies.
+  // mod(k, n) edits the engine tunables (n = copies); hooks run inside the engine (see engine.js hook()).
+  // NO perk touches the hitbox (player.hit) or deletes bullets except around the dash (nova) / a lethal hit (zero).
+  // price = Archive cost in ◆ (0 = starter pool).
+  const PK = [
+    { id: 'wide', name: '넓은 수신', rar: 'C', tag: 'GRAZE', icon: 'radar', stack: 2, price: 0,
+      desc: '스치기 범위 +4px (27→31, 2중첩 35)', mod: (k, n) => (k.grazeR += 4 * n) },
+    { id: 'echo', name: '잔향 콤보', rar: 'C', tag: 'FLOW', icon: 'echo', stack: 2, price: 0,
+      desc: '콤보 유지 시간 +0.8초 (2.5→3.3초)', mod: (k, n) => (k.comboT += 0.8 * n) },
+    { id: 'cell', name: '예비 전지', rar: 'C', tag: 'DASH', icon: 'battery', stack: 2, price: 0,
+      desc: '대시 충전 시간 −15% (중첩 가능)', mod: (k, n) => (k.dashRegenMul *= Math.pow(0.85, n)) },
+    { id: 'amp', name: '증폭기', rar: 'C', tag: 'GRAZE', icon: 'amp', stack: 2, price: 0,
+      desc: '스치기 점수 +30%', mod: (k, n) => (k.grazeMul += 0.3 * n) },
+    { id: 'coil', name: '과열 코일', rar: 'C', tag: 'FLOW', icon: 'coil', stack: 2, price: 0,
+      desc: '폭주 게이지: 스치기 3.5→4.5, 대시 관통 2.5→3.5', mod: (k, n) => ((k.eGraze += n), (k.ePhase += n)) },
+    { id: 'long', name: '긴 폭주', rar: 'C', tag: 'FLOW', icon: 'flame', stack: 2, price: 60,
+      desc: '폭주 지속 5→6.5초', mod: (k, n) => (k.odDur += 1.5 * n) },
+    { id: 'third', name: '세 번째 충전', rar: 'R', tag: 'DASH', icon: 'dash3', stack: 1, price: 0,
+      desc: '대시 최대 충전 2→3회', mod: (k) => (k.dashMax = 3) },
+    { id: 'mend', name: '스침 수선', rar: 'R', tag: 'GRAZE', icon: 'needle', stack: 1, price: 60,
+      desc: '한 섹터에서 무피격으로 60회 스치면 보호막 +1 (섹터당 1회)',
+      hooks: {
+        onGraze(e, q, st) {
+          if (!st.done && e.hits === 0 && e.grazes >= 60) {
+            st.done = true;
+            if (e.repair()) e.proc('mend');
+          }
+        },
+      } },
+    { id: 'reso', name: '공명탄', rar: 'R', tag: 'CORE', icon: 'core', stack: 1, price: 0,
+      desc: '코어 피해: 스치기 1→2, 대시 관통 3→4', mod: (k) => ((k.bossDmgGraze = 2), (k.bossDmgPhase = 4)) },
+    { id: 'stasis', name: '정지장', rar: 'R', tag: 'FLOW', icon: 'snow', stack: 1, price: 80,
+      desc: '폭주 중 탄속 감속 0.78→0.70', mod: (k) => (k.odSlow = 0.7) },
+    { id: 'nova', name: '대시 충격파', rar: 'R', tag: 'DASH', icon: 'burst', stack: 1, price: 0,
+      desc: '대시가 끝날 때 반경 70px 탄환 소거 (재사용 6초)',
+      hooks: {
+        onDashEnd(e, a, st) {
+          if (e.time - (st.last ?? -99) < 6) return;
+          st.last = e.time;
+          e.clearAround(e.player.x, e.player.y, 70);
+          e.proc('nova');
+        },
+      } },
+    { id: 'hard', name: '하드라이트', rar: 'E', tag: 'CORE', icon: 'shield', stack: 1, price: 140,
+      desc: '최대 보호막 3→4, 즉시 보호막 +1', mod: (k) => (k.shieldMax += 1), now: { shields: 1 } },
+    { id: 'mirror', name: '거울 스침', rar: 'E', tag: 'GRAZE', icon: 'mirror', stack: 1, price: 100,
+      desc: '스치기의 20%가 콤보 +2 추가',
+      hooks: {
+        onGraze(e) {
+          if (e.prng() < 0.2) {
+            e.combo += 2;
+            e.maxCombo = Math.max(e.maxCombo, e.combo);
+            e.proc('mirror');
+          }
+        },
+      } },
+    { id: 'crit', name: '임계 FLOW', rar: 'E', tag: 'FLOW', icon: 'crown', stack: 1, price: 160,
+      desc: '콤보 80에 x5, 콤보 150에 새 등급 x6',
+      mod: (k) => (k.tiers = [[150, 6], [80, 5], [50, 4], [25, 3], [10, 2]]) },
+    { id: 'zero', name: '제로 포인트', rar: 'L', tag: 'CORE', icon: 'zero', stack: 1, price: 260,
+      desc: '런당 1회, 치명타를 맞으면 보호막 1 + 2초 무적 + 주변 탄환 소거',
+      hooks: {
+        onLethal(e) {
+          if (e.flags.zeroUsed) return false;
+          e.flags.zeroUsed = true;
+          e.player.shields = 1;
+          e.player.invuln = 2;
+          e.proc('zero');
+          return true;
+        },
+      } },
+    { id: 'prism', name: '프리즘 코어', rar: 'L', tag: 'GRAZE', icon: 'prism', stack: 1, price: 220,
+      desc: '폭주 중 스치기 점수 x3, 스칠 때마다 폭주 +0.1초 (최대 +3초)',
+      mod: (k) => (k.odGrazeMul = 3),
+      hooks: {
+        onOverdrive(e, a, st) {
+          st.ext = 0;
+        },
+        onGraze(e, q, st) {
+          if (e.overdrive > 0 && (st.ext || 0) < 3) {
+            e.overdrive += 0.1;
+            st.ext = (st.ext || 0) + 0.1;
+          }
+        },
+      } },
+    { id: 'g_over', name: '과부하', rar: 'G', tag: 'GLITCH', icon: 'glitch', stack: 1, price: 80, glitch: true,
+      desc: '탄속 +8% · 점수 x1.35', mod: (k) => ((k.speedMul *= 1.08), (k.scoreMul *= 1.35)) },
+    { id: 'g_glass', name: '유리 대포', rar: 'G', tag: 'GLITCH', icon: 'glass', stack: 1, price: 80, glitch: true,
+      desc: '최대 보호막 −1 · 점수 x1.6',
+      mod: (k) => ((k.shieldMax = Math.max(1, k.shieldMax - 1)), (k.scoreMul *= 1.6)) },
+  ];
+  G.PERKS = PK;
+  G.STARTER_PERKS = PK.filter((p) => !p.price).map((p) => p.id);
+  // Resonance: 3 perks of one tag. Pseudo-perks with id 'res:TAG' (engine hooks / mods like perks).
+  G.RESONANCE = {
+    GRAZE: { id: 'res:GRAZE', tag: 'GRAZE', name: '스침 공명', desc: '콤보가 끊겨도 절반이 아닌 25%만 감소',
+      mod: (k) => (k.comboKeep = 0.75) },
+    DASH: { id: 'res:DASH', tag: 'DASH', name: '대시 공명', desc: '스치기 40회마다 대시 1회 충전',
+      hooks: {
+        onGraze(e) {
+          const p = e.player;
+          if (e.grazes % 40 === 0 && p.dashes < e.k.dashMax) {
+            p.dashes++;
+            e.events.push({ type: 'dashReady' });
+            e.proc('res:DASH');
+          }
+        },
+      } },
+    FLOW: { id: 'res:FLOW', tag: 'FLOW', name: '흐름 공명', desc: '폭주 시작마다 파편 +2',
+      hooks: {
+        onOverdrive(e) {
+          e.shard(2, 'flow');
+          e.proc('res:FLOW');
+        },
+      } },
+    CORE: { id: 'res:CORE', tag: 'CORE', name: '코어 공명', desc: '스펠 카드 격파 시 피격 1회 이하면 보호막 수리',
+      mod: (k) => (k.capRepairHits = 1) },
+  };
+  const BY = {};
+  for (const p of PK) BY[p.id] = p;
+  for (const t in G.RESONANCE) BY[G.RESONANCE[t].id] = G.RESONANCE[t];
+  G.perkDef = (id) => BY[id] || null;
+  G.RARITY = {
+    C: { name: '일반', color: '#9aa7bd', rank: 0 },
+    R: { name: '희귀', color: '#4deeea', rank: 1 },
+    E: { name: '영웅', color: '#a66cff', rank: 2 },
+    L: { name: '전설', color: '#ffd166', rank: 3 },
+    G: { name: '글리치', color: '#ff3b6b', rank: -1 },
   };
 })();
