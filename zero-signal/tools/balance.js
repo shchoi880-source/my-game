@@ -3,6 +3,8 @@
 //   node tools/balance.js            full gate run (exit code 1 on failure)
 //   node tools/balance.js --quick    fewer seeds, no gate
 //   node tools/balance.js --mission zero --mode hard
+//   node tools/balance.js --run      SIGNAL RUN gates (R1-R5, see loop.md §11); --deep = all depths,
+//                                    --perk-audit = force each perk at draft 1 and compare human clears
 global.window = global;
 Object.defineProperty(globalThis, 'navigator', { value: { vibrate() {} }, writable: true, configurable: true });
 global.localStorage = { getItem: () => null, setItem() {} };
@@ -10,6 +12,7 @@ global.matchMedia = () => ({ matches: false });
 require('../js/core.js');
 require('../js/patterns.js');
 require('../js/engine.js');
+require('../js/run.js');
 
 const args = process.argv.slice(2),
   arg = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : null),
@@ -172,9 +175,158 @@ function run(m, mode, seed, kind) {
   return { st, hitKinds, secHits, secAvg: secSum.map((v, i) => v / (secN[i] || 1)), secPeak, boss: e.boss };
 }
 
+// ---------------------------------------------------------------- SIGNAL RUN harness
+// Draft policies: none (skip all), random, greedy (highest rarity, prefer tag completion, never glitch),
+// cursed (always take a glitch when offered). Meta/Calibration all ON (every perk in the pool, 2 free rerolls,
+// 4th card) = worst case for "too easy". Shop: repair when damaged, then rarity boost (greedy).
+const RUN_SEED = (k) => (0x2f6b1a3 + k * 2654435761) >>> 0;
+function pickPolicy(r, policy, rng) {
+  const o = G.Run.offers(r);
+  if (policy === 'none' || !o.length) return G.Run.skip(r);
+  if (policy === 'random') return G.Run.pick(r, Math.floor(rng() * o.length));
+  if (policy === 'cursed') {
+    const g = o.findIndex((c) => c.glitch);
+    return G.Run.pick(r, g >= 0 ? g : Math.floor(rng() * o.length));
+  }
+  // greedy
+  let best = -1,
+    bv = -1e9;
+  o.forEach((c, i) => {
+    if (c.glitch) return;
+    const tagN = r.picks.filter((x) => G.perkDef(x).tag === c.tag).length,
+      v = G.RARITY[c.rarity].rank * 10 + (c.completes ? 8 : 0) + tagN * 2;
+    if (v > bv) (bv = v), (best = i);
+  });
+  return best < 0 ? G.Run.skip(r) : G.Run.pick(r, best);
+}
+function shopPolicy(r, policy) {
+  for (const it of G.Run.shopItems(r)) if (it.id === 'repair' && it.can) G.Run.buy(r, 'repair');
+  if (policy === 'greedy') for (const id of ['boost', 'fourth']) G.Run.buy(r, id);
+  G.Run.leaveShop(r);
+}
+function playRun(k, depth, kind, policy, extra = {}) {
+  const seed = RUN_SEED(k),
+    r = G.Run.create(seed, depth, { freeRerolls: 2, cache4: true, ...extra }),
+    pilot = makePilot(kind, seed ^ 0x5bd1e995),
+    rng = G.mulberry(seed ^ 0xc0ffee),
+    secHits = [];
+  while (r.state === 'play' || r.state === 'boss') {
+    const e = r.engine;
+    if (kind === 'idle') {
+      e.player.shields = 1e9;
+      e.k.shieldMax = 2e9;
+    }
+    const h0 = e.hits;
+    G.Run.playSector(r, (en) => pilot.act(en));
+    secHits.push(e.hits - h0);
+    if (kind === 'idle' && r.carry) r.carry.shields = 3;
+    if (r.state === 'pick') pickPolicy(r, policy, rng);
+    if (r.state === 'shop') shopPolicy(r, policy);
+  }
+  return { r, s: G.Run.summary(r), secHits };
+}
+function runGates() {
+  // human runs are cheap: 2x seeds for them (binomial noise), expert runs use SEEDS
+  const NX = SEEDS,
+    NH = SEEDS * 2,
+    DEEP = args.includes('--deep'),
+    t0 = Date.now(),
+    rows = [];
+  let rf = 0;
+  const g = (ok, id, msg) => {
+    if (!ok) rf++;
+    rows.push([ok ? 'ok' : 'FAIL', id, msg]);
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${id} ${msg}`);
+  };
+  const batch = (depth, kind, policy, extra) =>
+    [...Array(kind === 'expert' ? NX : NH)].map((_, k) => playRun(k, depth, kind, policy, extra));
+  const clears = (b) => b.filter((x) => x.s.clear).length;
+  const med = (a) => {
+    const s = [...a].sort((x, y) => x - y);
+    return s.length ? (s[(s.length - 1) >> 1] + s[s.length >> 1]) / 2 : 0;
+  };
+  const avg = (b, f) => b.reduce((a, x) => a + f(x), 0) / b.length;
+  const table = [];
+  const line = (label, b) => {
+    const row = {
+      label,
+      clear: `${clears(b)}/${b.length}`,
+      sectors: avg(b, (x) => x.s.sectorsCleared).toFixed(2),
+      hits: avg(b, (x) => x.s.hits).toFixed(1),
+      score: Math.round(med(b.map((x) => x.s.score))),
+      shards: avg(b, (x) => x.s.shardsEarned).toFixed(0),
+    };
+    table.push(row);
+    console.log(`  ${label.padEnd(20)} clear ${row.clear} · avg sectors ${row.sectors} · hits ${row.hits} · score med ${row.score} · shards ${row.shards}`);
+  };
+  const N = NH;
+  console.log(`\n=== SIGNAL RUN (${NH} human / ${NX} expert run seeds) ===`);
+  // R1: idle pilot, every perk forced, is hit in every sector
+  const idle = batch(0, 'idle', 'none', { forced: G.PERKS.map((p) => p.id) }),
+    idleMin = [0, 1, 2, 3, 4].map((i) => Math.min(...idle.map((x) => x.secHits[i] ?? 0)));
+  console.log(`  idle (all 18 perks) hits/sector min: ${idleMin.join(' / ')}`);
+  g(idleMin.every((h) => h >= 1), 'R1', `standing still is hit in every sector, all perks forced (${idleMin.join('/')})`);
+  const hr = batch(0, 'human', 'random'),
+    hn = batch(0, 'human', 'none'),
+    hc = batch(0, 'human', 'cursed');
+  line('human random D0', hr);
+  line('human none D0', hn);
+  line('human cursed D0', hc);
+  g(clears(hr) >= Math.ceil(N * 0.6), 'R2', `human + random picks clears D0 >= 6/10 (${clears(hr)}/${N})`);
+  g(clears(hn) >= Math.ceil(N * 0.4), 'R2', `human + no perks clears D0 >= 4/10 (${clears(hn)}/${N})`);
+  g(clears(hc) <= clears(hr) + Math.ceil(N * 0.1), 'R3', `glitches do not make runs easier (cursed ${clears(hc)}/${N} vs random ${clears(hr)}/${N})`);
+  const xg = batch(0, 'expert', 'greedy'),
+    xn = batch(0, 'expert', 'none');
+  line('expert greedy D0', xg);
+  line('expert none D0', xn);
+  g(clears(xg) >= Math.ceil(NX * 0.9), 'R4', `expert + greedy clears D0 >= 9/10 (${clears(xg)}/${NX})`);
+  const depths = DEEP ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] : [0, 3, 6, 10],
+    dc = [],
+    ds = [];
+  for (const d of depths) {
+    const b = d === 0 ? hr : batch(d, 'human', 'random');
+    if (d) line(`human random D${d}`, b);
+    dc.push(clears(b));
+    ds.push(avg(b, (x) => x.s.sectorsCleared));
+  }
+  // binomial noise at 20 seeds is ~±2 clears: gate the mean sectors reached (smooth) and clears with slack
+  g(
+    ds.every((v, i) => !i || v <= ds[i - 1] + 0.2) && dc.every((c, i) => !i || c <= dc[i - 1] + Math.ceil(N * 0.1)) && dc[dc.length - 1] < dc[0],
+    'R4',
+    `human difficulty non-increasing over depth ${depths.map((d, i) => `D${d}:${dc[i]}/${N}(${ds[i].toFixed(1)}s)`).join(' ')}`,
+  );
+  const x10 = batch(10, 'expert', 'greedy');
+  line('expert greedy D10', x10);
+  g(clears(x10) >= 1, 'R4', `expert + greedy clears D10 at least once (${clears(x10)}/${NX})`);
+  const ratio = med(xg.map((x) => x.s.score)) / Math.max(1, med(xn.map((x) => x.s.score))),
+    ratioH = med(hr.map((x) => x.s.score)) / Math.max(1, med(hn.map((x) => x.s.score)));
+  g(ratio <= 2.5, 'R5', `score growth capped: expert greedy / none median ${ratio.toFixed(2)} <= 2.5 (human random/none ${ratioH.toFixed(2)})`);
+  if (args.includes('--perk-audit')) {
+    console.log('  perk audit (forced at start, human, D0, random picks after):');
+    const base = clears(hr);
+    for (const p of G.PERKS) {
+      const b = batch(0, 'human', 'random', { forced: [p.id] }),
+        dlt = ((clears(b) - base) * 100) / N;
+      console.log(`    ${p.id.padEnd(8)} clear ${clears(b)}/${N} (${dlt >= 0 ? '+' : ''}${dlt.toFixed(0)}pp) score med ${Math.round(med(b.map((x) => x.s.score)))}`);
+    }
+  }
+  console.log('\npilot+policy         clear   sectors  hits  score(med)  shards');
+  for (const r of table)
+    console.log(`${r.label.padEnd(21)}${r.clear.padEnd(8)}${r.sectors.padEnd(9)}${r.hits.padEnd(6)}${String(r.score).padEnd(12)}${r.shards}`);
+  console.log('\ngate  id  result');
+  for (const r of rows) console.log(`${r[0].padEnd(6)}${r[1].padEnd(4)}${r[2]}`);
+  console.log(`(${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+  console.log(rf ? `\n${rf} run gate(s) FAILED` : '\nall run gates passed');
+  process.exitCode = rf ? 1 : 0;
+}
+
 // ---------------------------------------------------------------- report + gates
 if (require.main !== module) {
-  module.exports = { run, makePilot, choose, seedOf };
+  module.exports = { run, makePilot, choose, seedOf, playRun, RUN_SEED };
+  return;
+}
+if (args.includes('--run')) {
+  runGates();
   return;
 }
 let fails = 0;

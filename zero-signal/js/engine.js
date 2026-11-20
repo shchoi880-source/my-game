@@ -33,10 +33,47 @@
    * Scoring: passive 10/s x mult, graze 60 x mult (x2 in overdrive), dash-phase 80 x mult.
    * Combo timer 2.5s; when it lapses the combo halves instead of resetting (a hit resets it).
    * Boss takes 1 damage per graze and 3 per dash-phased bullet while active.
+   *
+   * ---- SIGNAL RUN extensions (all optional; a bare mission behaves exactly as before) ----
+   * new G.Engine(mission, { mode, seed, timeline, mods, carry, perks, perkSeed })
+   *   timeline  prebuilt timeline (G.makeTimeline(m, mode, o)); default G.makeTimeline(mission, mode)
+   *   mods      overrides for the tunables object this.k (defaults G.ENGINE_K0, see below)
+   *   carry     { score, shields, combo, energy, dashes, maxCombo, breakdown, flags } from a previous
+   *             sector's stats().carryOut (sector continuation)
+   *   perks     ids of perks / resonances with hooks (G.perkDef(id).hooks); see patterns.js G.PERKS
+   *   perkSeed  seed of this.prng — perk randomness never touches this.rng (bullet RNG)
+   * Extra events: nearMiss{x,y} shard{n,why} perkProc{id} revive{} (resonance{tag} is emitted by run.js)
+   * stats() adds: nearMisses, shards, perkProcs{id:n}, phased, carryOut{...}
+   * The hitbox (player.hit = 5) is never modified by tunables.
    */
   const G = (window.G = window.G || {}),
     STEP = 1 / 120;
-  const mult = (c) => (c >= 100 ? 5 : c >= 50 ? 4 : c >= 25 ? 3 : c >= 10 ? 2 : 1);
+  // Tunables. mods={} reproduces the pre-run engine exactly (verified by tools/verify.js).
+  const K0 = {
+    grazeR: 27, // graze radius (px)
+    comboT: 2.5, // combo timer (s)
+    comboKeep: 0.5, // fraction of combo kept when the timer lapses
+    dashMax: 2,
+    dashRegenMul: 1,
+    shieldMax: 3,
+    shields0: 3, // starting shields when there is no carry
+    eGraze: 3.5, // overdrive energy per graze
+    ePhase: 2.5, // ... per dash-phased bullet
+    odDur: 5, // overdrive length (s)
+    odSlow: 0.78, // bullet speed factor during overdrive
+    odGrazeMul: 2, // graze score factor during overdrive
+    grazeMul: 1, // graze score factor
+    scoreMul: 1, // factor on every score source (glitches)
+    speedMul: 1, // bullet speed factor
+    teleDelta: 0, // added to the core telegraph length
+    bossDmgGraze: 1,
+    bossDmgPhase: 3,
+    tiers: [[100, 5], [50, 4], [25, 3], [10, 2]], // [combo, multiplier], descending
+    repairs: null, // section indices that repair a shield (null = mode default)
+    clearBonus: 2000, // survival bonus per remaining shield
+    capRepairHits: 0, // a captured spell card repairs if cardHits <= this
+  };
+  G.ENGINE_K0 = K0;
   class Engine {
     constructor(mission, opts = {}) {
       if (typeof opts === 'string') opts = { mode: opts };
@@ -45,7 +82,19 @@
       this.md = G.modeOf(this.mode);
       this.seed = opts.seed ?? mission.seed;
       this.rng = G.mulberry(this.seed);
-      this.timeline = G.makeTimeline(mission, this.mode);
+      this.k = { ...K0, ...(opts.mods || {}) };
+      const k = this.k,
+        c = opts.carry || null;
+      this.prng = G.mulberry(opts.perkSeed ?? (this.seed ^ 0x2545f491));
+      this.flags = c && c.flags ? { ...c.flags } : {};
+      this.perkState = {};
+      this.perkProcs = {};
+      this.hooks = [];
+      for (const id of opts.perks || []) {
+        const d = G.perkDef && G.perkDef(id);
+        if (d && d.hooks) this.hooks.push({ id, h: d.hooks });
+      }
+      this.timeline = opts.timeline || G.makeTimeline(mission, this.mode);
       this.eventIndex = 0;
       this.sectionIndex = 0;
       this.left = 74;
@@ -61,11 +110,11 @@
         vy: 0,
         r: 12,
         hit: 5,
-        graze: 27,
-        shields: 3,
+        graze: k.grazeR,
+        shields: Math.max(1, Math.min(k.shieldMax, c ? c.shields : k.shields0)),
         invuln: 0,
         dashT: 0,
-        dashes: 2,
+        dashes: c && c.dashes != null ? Math.min(k.dashMax, c.dashes) : k.dashMax,
         dashRegen: 0,
         lastDx: 0,
         lastDy: -1,
@@ -94,6 +143,17 @@
       this.sectionHits = 0;
       this.cardHits = 0;
       this.breakdown = { passive: 0, graze: 0, phase: 0, bonus: 0 };
+      this.nearMisses = 0;
+      this.shards = 0;
+      this.phased = 0;
+      if (c) {
+        this.score = c.score || 0;
+        this.combo = c.combo || 0;
+        this.maxCombo = c.maxCombo || 0;
+        this.comboT = this.combo > 0 ? k.comboT : 0;
+        this.energy = c.energy || 0;
+        if (c.breakdown) Object.assign(this.breakdown, c.breakdown);
+      }
       this.boss = {
         hp: this.timeline.bossHp,
         max: this.timeline.bossHp,
@@ -106,7 +166,40 @@
         final: false,
       };
       this.emitters = [];
-      this.bulletCap = mission.difficulty === 3 ? 420 : mission.difficulty === 2 ? 360 : 320;
+      this.bulletCap =
+        mission.bulletCap || (mission.difficulty === 3 ? 420 : mission.difficulty === 2 ? 360 : 320);
+    }
+    mult(c) {
+      for (const t of this.k.tiers) if (c >= t[0]) return t[1];
+      return 1;
+    }
+    // run perk hooks; returns true if any hook returned true
+    hook(name, a) {
+      let r = false;
+      for (const p of this.hooks) {
+        const fn = p.h[name];
+        if (fn && fn(this, a, this.perkState[p.id] || (this.perkState[p.id] = {}))) r = true;
+      }
+      return r;
+    }
+    proc(id) {
+      this.perkProcs[id] = (this.perkProcs[id] || 0) + 1;
+      this.events.push({ type: 'perkProc', id });
+    }
+    shard(n, why) {
+      this.shards += n;
+      this.events.push({ type: 'shard', n, why });
+    }
+    repair() {
+      const p = this.player;
+      if (p.shields >= this.k.shieldMax) return false;
+      p.shields++;
+      this.events.push({ type: 'repair', shields: p.shields });
+      return true;
+    }
+    clearAround(x, y, r) {
+      for (let i = this.bullets.length - 1; i >= 0; i--)
+        if (Math.hypot(this.bullets[i].x - x, this.bullets[i].y - y) < r) this.bullets.splice(i, 1);
     }
     setInput(x, y, focus = false) {
       const l = Math.hypot(x, y) || 1;
@@ -128,8 +221,8 @@
         y,
         px: x,
         py: y,
-        vx: Math.cos(a) * s,
-        vy: Math.sin(a) * s,
+        vx: Math.cos(a) * s * this.k.speedMul,
+        vy: Math.sin(a) * s * this.k.speedMul,
         r,
         color: opt.color || '#ff4d6d',
         curve: opt.curve || 0,
@@ -140,19 +233,21 @@
       });
     }
     addScore(kind, v) {
+      v *= this.k.scoreMul;
       this.score += v;
       this.breakdown[kind] += v;
     }
     bonus(label, value) {
-      value = Math.round(value);
-      this.addScore('bonus', value);
+      value = Math.round(value * this.k.scoreMul);
+      this.score += value;
+      this.breakdown.bonus += value;
       this.events.push({ type: 'bonus', label, value });
     }
     fire(type, opt) {
       const fn = G.Patterns[type];
       if (!fn) return;
       if (opt && opt.warn) {
-        const life = this.md.tele;
+        const life = Math.max(0.15, this.md.tele + this.k.teleDelta);
         this.telegraphs.push({ t: life, life, type, x: this.cx, y: this.cy, color: opt.color });
       }
       fn(this, this.player, opt);
@@ -183,10 +278,8 @@
       if (k > 0) {
         if (captured) {
           this.bonus('스펠 격파', 2000 * k * this.md.bonus);
-          if (this.cardHits === 0 && p.shields < 3) {
-            p.shields++;
-            this.events.push({ type: 'repair', shields: p.shields });
-          }
+          this.shard(3, 'spell');
+          if (this.cardHits <= this.k.capRepairHits) this.repair();
         }
         this.clearScreen();
       }
@@ -231,10 +324,7 @@
         this.sectionHits = 0;
         this.sectionIndex++;
         this.events.push({ type: 'section', name: tl.sections[this.sectionIndex].name });
-        if (this.md.repairs.includes(this.sectionIndex) && p.shields < 3) {
-          p.shields++;
-          this.events.push({ type: 'repair', shields: p.shields });
-        }
+        if ((this.k.repairs || this.md.repairs).includes(this.sectionIndex)) this.repair();
       }
       // boss start / spell cards
       if (!b0.active && !b0.broken && b0.phase < 0 && this.time >= tl.bossStart) {
@@ -291,11 +381,12 @@
         p.vx = p.lastDx * 850;
         p.vy = p.lastDy * 850;
         this.events.push({ type: 'dash', x: p.x, y: p.y });
+        this.hook('onDash');
       }
       this.dashQueued = false;
-      if (p.dashes < 2) {
+      if (p.dashes < this.k.dashMax) {
         p.dashRegen += dt;
-        if (p.dashRegen >= this.md.dashRegen) {
+        if (p.dashRegen >= this.md.dashRegen * this.k.dashRegenMul) {
           p.dashes++;
           p.dashRegen = 0;
           this.events.push({ type: 'dashReady' });
@@ -305,6 +396,7 @@
         p.dashT -= dt;
         p.vx *= 0.992;
         p.vy *= 0.992;
+        if (p.dashT <= 0) this.hook('onDashEnd');
       } else {
         const max = i.focus ? 210 : 350,
           accel = i.focus ? 2300 : 2900,
@@ -321,7 +413,8 @@
       p.y = G.clamp(p.y + p.vy * dt, this.top + p.r, this.bottom - p.r);
       p.invuln = Math.max(0, p.invuln - dt);
       const od = this.overdrive > 0,
-        slow = od ? 0.78 : 1;
+        slow = od ? this.k.odSlow : 1,
+        k = this.k;
       for (let b = this.bullets.length - 1; b >= 0; b--) {
         const q = this.bullets[b];
         if (!q) continue; // the screen may have been cleared by a boss break mid-loop
@@ -353,10 +446,12 @@
           d = Math.hypot(dx, dy);
         if (p.dashT > 0 && d < q.r + p.r + 5) {
           this.bullets.splice(b, 1);
-          this.addScore('phase', 80 * mult(this.combo));
-          this.energy = Math.min(100, this.energy + 2.5);
+          this.addScore('phase', 80 * this.mult(this.combo));
+          this.energy = Math.min(100, this.energy + k.ePhase);
           this.events.push({ type: 'phase', x: q.x, y: q.y, color: q.color });
-          this.damage(3);
+          this.damage(k.bossDmgPhase);
+          if (++this.phased % 4 === 0) this.shard(1, 'phase');
+          this.hook('onPhase', q);
           continue;
         }
         if (p.invuln <= 0 && d < q.r + p.hit) {
@@ -365,37 +460,48 @@
           this.bullets.splice(b, 1);
           continue;
         }
+        if (!q.near && p.invuln <= 0 && d < q.r + p.hit + 3) {
+          q.near = true;
+          this.nearMisses++;
+          this.events.push({ type: 'nearMiss', x: q.x, y: q.y });
+        }
         if (!q.grazed && d < q.r + p.graze) {
           q.grazed = true;
           this.grazes++;
           this.combo++;
           this.maxCombo = Math.max(this.maxCombo, this.combo);
-          this.comboT = 2.5;
-          this.addScore('graze', 60 * mult(this.combo) * (od ? 2 : 1));
-          this.energy = Math.min(100, this.energy + 3.5);
+          this.comboT = k.comboT;
+          this.addScore('graze', 60 * this.mult(this.combo) * (od ? k.odGrazeMul : 1) * k.grazeMul);
+          this.energy = Math.min(100, this.energy + k.eGraze);
           this.events.push({ type: 'graze', x: q.x, y: q.y, combo: this.combo });
-          this.damage(1);
+          this.damage(k.bossDmgGraze);
+          if (this.grazes % 10 === 0) this.shard(1, 'graze');
+          this.hook('onGraze', q);
+          if (this.dead) return;
         }
       }
       if (this.comboT > 0) {
         this.comboT -= dt;
         if (this.comboT <= 0) {
-          this.combo = Math.floor(this.combo / 2);
-          if (this.combo > 0) this.comboT = 2.5;
+          this.combo = Math.floor(this.combo * this.k.comboKeep);
+          if (this.combo > 0) this.comboT = this.k.comboT;
         }
       }
       if (this.energy >= 100 && this.overdrive <= 0) {
         this.energy = 0;
-        this.overdrive = 5;
+        this.overdrive = this.k.odDur;
         this.overdrives++;
         this.events.push({ type: 'overdrive' });
+        this.hook('onOverdrive');
       }
       this.overdrive = Math.max(0, this.overdrive - dt);
-      this.addScore('passive', dt * 10 * mult(this.combo));
+      this.addScore('passive', dt * 10 * this.mult(this.combo));
       if (this.time >= this.mission.duration) {
         this.time = this.mission.duration;
         if (this.sectionHits === 0) this.bonus('무피격 구간', 500 * (this.sectionIndex + 1));
-        this.bonus('생존 보너스', p.shields * 2000 * this.md.bonus);
+        this.bonus('생존 보너스', p.shields * this.k.clearBonus * this.md.bonus);
+        if (this.hits === 0) this.shard(6, 'nohit');
+        this.hook('onSectorEnd');
         this.done = true;
         this.boss.active = false;
         this.bullets.length = 0;
@@ -417,6 +523,10 @@
       this.events.push({ type: 'hit', x: p.x, y: p.y, shields: p.shields });
       for (let i = this.bullets.length - 1; i >= 0; i--)
         if (Math.hypot(this.bullets[i].x - p.x, this.bullets[i].y - p.y) < 190) this.bullets.splice(i, 1);
+      if (p.shields <= 0 && this.hook('onLethal')) {
+        this.events.push({ type: 'revive', shields: p.shields });
+        return;
+      }
       if (p.shields <= 0) {
         this.dead = true;
         this.boss.active = false;
@@ -443,6 +553,20 @@
         sectionTimes: this.timeline.sections.map((q) => q.t),
         overdrives: this.overdrives,
         breakdown: { ...this.breakdown },
+        nearMisses: this.nearMisses,
+        shards: this.shards,
+        phased: this.phased,
+        perkProcs: { ...this.perkProcs },
+        carryOut: {
+          score: this.score,
+          shields: this.player.shields,
+          combo: this.combo,
+          maxCombo: this.maxCombo,
+          energy: this.energy,
+          dashes: this.player.dashes,
+          breakdown: { ...this.breakdown },
+          flags: { ...this.flags },
+        },
       };
       s.grade = G.gradeRun(s, this.mission, this.mode);
       return s;
