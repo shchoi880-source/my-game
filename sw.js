@@ -1,6 +1,6 @@
 // 오프라인 캐시: 게임 파일을 기기에 저장해 인터넷 없이 실행되게 함.
 // 파일을 수정해서 올릴 때마다 VERSION 숫자를 올려 주세요.
-const VERSION = 'nd-15';
+const VERSION = 'nd-16';
 const CACHE = 'neonjump-' + VERSION;
 const SFX = ['back', 'bigboom', 'book', 'chop', 'click', 'coin', 'confirm', 'door', 'draw', 'equip', 'error', 'explode', 'fire', 'gold', 'hit', 'hurt', 'kill', 'laser', 'latch', 'open', 'page', 'potion', 'shield', 'slash', 'slash2', 'step'];
 const ASSETS = [
@@ -26,6 +26,8 @@ self.addEventListener('activate', e => {
 // 캐시 먼저 보여주고, 인터넷이 되면 뒤에서 새 버전으로 갱신
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // 같은 저장소의 다른 게임(zero-signal/ 등)은 그 게임의 서비스 워커가 담당 — 네온 점프는 손대지 않음
+  if (new URL(e.request.url).pathname.indexOf('/zero-signal/') >= 0) return;
   e.respondWith(
     caches.open(CACHE).then(cache =>
       cache.match(e.request, { ignoreSearch: true }).then(cached => {
