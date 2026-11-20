@@ -5,7 +5,7 @@
 //   node tools/verify.js lv3             특정 레벨
 //   node tools/verify.js test            내장 테스트 레벨 + 엔진 자체 테스트
 //   node tools/verify.js --phys          물리 수치 표 (점프 높이/거리 등)
-//   옵션: --beam N (빔 폭, 기본 3000)  --taps (해답 탭 시각 전체 출력)
+//   옵션: --hard (하드 모드 버전 검증)  --beam N (빔 폭, 기본 3000)  --taps (해답 탭 시각 전체 출력)
 //         --levels 파일.js (js/levels.js 대신 다른 레벨 파일 로드)
 const fs = require('fs');
 const path = require('path');
@@ -615,7 +615,9 @@ if (names[0] === 'test') {
   fails += selfTest();
   levels = TEST_LEVELS;
 } else {
-  const real = hasLevels && Array.isArray(G.LEVELS) ? G.LEVELS : null;
+  let real = hasLevels && Array.isArray(G.LEVELS) ? G.LEVELS : null;
+  // --hard: 하드 모드(G.hardLevel) 버전을 검증. 레벨 id는 lv1h 처럼 끝에 h
+  if (real && process.argv.includes('--hard') && G.hardLevel) real = real.map(G.hardLevel);
   if (!real) console.log(hasLevels ? '! G.LEVELS 없음 — 내장 테스트 레벨 사용' : '! js/levels.js 없음 — 내장 테스트 레벨 사용');
   const pool = (real || []).concat(TEST_LEVELS);
   levels = names.length ? pool.filter(l => names.includes(l.id)) : (real || TEST_LEVELS);

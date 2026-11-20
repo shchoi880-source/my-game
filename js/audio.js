@@ -727,8 +727,10 @@
     return t;
   }
 
-  function start(id, fromSec) {
-    const tr = getTrack(id) || getTrack('lv1');
+  function start(id, fromSec, rate) {
+    let tr = getTrack(id) || getTrack('lv1');
+    // 하드 모드: 같은 곡을 rate배 빠른 템포로
+    if (rate && rate !== 1) tr = Object.assign({}, tr, { bpm: tr.bpm * rate });
     kill(run);
     fromSec = Math.max(0, +fromSec || 0);
     ducked = false;

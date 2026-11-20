@@ -419,4 +419,29 @@
   }));
 
   G.LEVELS = LEVELS;
+
+  // ───────────── 하드 모드 ─────────────
+  // 같은 맵을 tscale배 빠르게: 속도·BPM·중력·점프가 모두 비례 → 점프 궤적은 노말과 같고
+  // 반응 시간만 짧아진다(노말에서 깰 수 있는 길은 하드에서도 그대로 존재).
+  const HARD_SCALE = { lv1: 1.3, lv2: 1.3, lv3: 1.25, lv4: 1.2, lv5: 1.15 };
+  const hardCache = {};
+  G.HARD_SCALE = HARD_SCALE;
+  G.hardLevel = lv => {
+    if (!lv || lv.hard) return lv;
+    if (hardCache[lv.id] && hardCache[lv.id].objects.length === lv.objects.length) return hardCache[lv.id];
+    const k = HARD_SCALE[lv.id] || 1.25;
+    const objects = lv.objects.map(o => {
+      const c = Object.assign({}, o);
+      if (c.t === 'saw' && c.period) c.period = +(c.period / k).toFixed(4);
+      delete c._gi;
+      return c;
+    });
+    const h = Object.assign({}, lv, {
+      id: lv.id + 'h', baseId: lv.id, hard: true, tscale: k,
+      speed: lv.speed * k, bpm: lv.bpm * k, objects,
+      name: lv.name,
+    });
+    hardCache[lv.id] = h;
+    return h;
+  };
 })();

@@ -135,6 +135,11 @@
     const P = prep(level);
     const list = P.list, xMinA = P.xMin, pmA = P.pm, gap0 = P.gap0, gap1 = P.gap1, ng = gap0.length, n = list.length;
     const speed = level.speed || 400, length = level.length || Infinity;
+    // 하드 모드: 시간을 k배 빠르게(속도·중력·점프 모두 비례) → 점프 궤적(모양)은 같고 반응 시간만 짧아짐
+    const k = level.tscale || 1;
+    const JUMP_V = PHYS.jumpV * k, ORB_V = PHYS.orbV * k, DJUMP_V = PHYS.djumpV * k, PAD_V = PHYS.padV * k;
+    const GRAV = PHYS.gravity * k * k, MAX_FALL = PHYS.maxFall * k, ROT_SPEED = PHYS.rotSpeed * k;
+    const COYOTE = PHYS.coyote / k, BUFFER = PHYS.buffer / k;
     const quiet = !!opts.quiet;
     const near = new Uint8Array(n);
     const events = [];
@@ -223,19 +228,19 @@
       // --- 입력 / 점프 ---
       let fresh = false;
       const wasGrounded = s.grounded;
-      if (pending) { pending = false; buf = PHYS.buffer; fresh = true; }
+      if (pending) { pending = false; buf = BUFFER; fresh = true; }
       if (buf > 0) {
         if (s.grounded || coyoteT > 0) {
-          s.vy = PHYS.jumpV; s.grounded = false; coyoteT = 0; s.jumpsLeft = 1; buf = 0;
+          s.vy = JUMP_V; s.grounded = false; coyoteT = 0; s.jumpsLeft = 1; buf = 0;
           emit('jump');
         } else {
           const oi = findOrb();
           if (oi >= 0) {
-            s.vy = PHYS.orbV; lastOrb = oi; buf = 0;
+            s.vy = ORB_V; lastOrb = oi; buf = 0;
             const o = list[oi];
             emit('orb', { ox: o.x, oy: o.y, obj: o });
           } else if (fresh && s.jumpsLeft > 0) {
-            s.vy = PHYS.djumpV; s.jumpsLeft = 0; buf = 0;
+            s.vy = DJUMP_V; s.jumpsLeft = 0; buf = 0;
             emit('djump');
           }
         }
@@ -245,8 +250,8 @@
       // --- 적분 (semi-implicit Euler) ---
       // 평균 속도 적분 → 스텝 크기와 무관하게 정확한 포물선 (점프 높이 = v²/2g)
       const prevY = s.y, vy0 = s.vy;
-      s.vy -= PHYS.gravity * dt;
-      if (s.vy < -PHYS.maxFall) s.vy = -PHYS.maxFall;
+      s.vy -= GRAV * dt;
+      if (s.vy < -MAX_FALL) s.vy = -MAX_FALL;
       s.y += (vy0 + s.vy) * 0.5 * dt;
       s.x += speed * dt;
       s.t += dt;
@@ -278,7 +283,7 @@
         const py = o.y || 0;
         if (x < o.x + PHYS.padW && x + S > o.x && s.y <= py + PHYS.padH && s.y + S > py) {
           if (s.vy <= 0 || wasGrounded) { // 떨어지는 중/달리는 중 접촉 (발사 직후 재발동 방지)
-            s.vy = PHYS.padV; s.jumpsLeft = 1; coyoteT = 0; landed = false;
+            s.vy = PAD_V; s.jumpsLeft = 1; coyoteT = 0; landed = false;
             if (s.grounded) s.grounded = false;
             emit('pad', { ox: o.x + PHYS.padW / 2, oy: py, obj: o });
           }
@@ -293,9 +298,9 @@
         }
         s.jumpsLeft = 1; coyoteT = 0;
       } else {
-        if (s.grounded) { s.grounded = false; coyoteT = PHYS.coyote; }
+        if (s.grounded) { s.grounded = false; coyoteT = COYOTE; }
         else if (coyoteT > 0) coyoteT -= dt;
-        s.rot += PHYS.rotSpeed * dt;
+        s.rot += ROT_SPEED * dt;
         if (s.rot >= TAU) s.rot -= TAU;
       }
 

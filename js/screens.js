@@ -61,6 +61,7 @@
   const eoc = t => (G.easeOutCubic ? G.easeOutCubic(clamp(t, 0, 1)) : clamp(t, 0, 1));
   const DIFF = ['쉬움', '보통', '어려움', '매우 어려움', '극악'];
   const DIFF_COL = ['#3dffb0', '#29f0ff', '#ffd23d', '#ff7a3d', '#ff2d6a'];
+  const HARD_COL = '#ff4d6d';
   const levels = () => (Array.isArray(G.LEVELS) ? G.LEVELS : []);
   const save = () => G.save;
   const lvSave = lv => (G.save && lv ? G.save.level(lv.id) : { best: 0, done: false, attempts: 0, coins: [false, false, false], bestTime: null, practiceBest: 0 });
@@ -73,7 +74,7 @@
   let curTrack = null;
   const A = {
     sfx(n, o) { try { if (G.audio && G.audio.sfx) G.audio.sfx(n, o); } catch (e) { /* 무시 */ } },
-    start(track, from) { try { if (G.audio && G.audio.music && G.audio.music.start) { G.audio.music.start(track, from || 0); curTrack = track; } } catch (e) { /* 무시 */ } },
+    start(track, from, rate) { try { if (G.audio && G.audio.music && G.audio.music.start) { G.audio.music.start(track, from || 0, rate || 1); curTrack = track; } } catch (e) { /* 무시 */ } },
     stop() { try { if (G.audio && G.audio.music && G.audio.music.stop) G.audio.music.stop(); } catch (e) { /* 무시 */ } curTrack = null; },
     duck(on) { try { if (G.audio && G.audio.music && G.audio.music.duck) G.audio.music.duck(on); } catch (e) { /* 무시 */ } },
     layer(n) { try { if (G.audio && G.audio.music && G.audio.music.setLayer) G.audio.music.setLayer(n); } catch (e) { /* 무시 */ } },
@@ -460,11 +461,11 @@
   // ======================================================================
   // ===== SELECT =====
   // ======================================================================
-  const sel = { t: 0, practice: false, settings: false, setT: 0, focus: 0, shake: {} };
+  const sel = { t: 0, practice: false, hard: false, settings: false, setT: 0, focus: 0, shake: {} };
   function playLevel(i) {
     if (!unlocked(i)) { A.sfx('back'); sel.shake[i] = 0.4; G.vibrate && G.vibrate(30); return; }
     A.sfx('click');
-    nav('play', { level: i, practice: sel.practice });
+    nav('play', { level: i, practice: sel.practice, hard: sel.hard });
   }
   function toggleSetting(key) {
     const d = G.save && G.save.data;
@@ -493,7 +494,7 @@
     const R = RN();
     const lv = levels()[i];
     const th = Object.assign({}, R.DEFAULT_THEME, lv.theme || {});
-    const sv = lvSave(lv);
+    const sv = lvSave(sel.hard && G.hardLevel ? G.hardLevel(lv) : lv);
     const lock = !unlocked(i);
     const focus = sel.focus === i;
     ctx.save();
@@ -515,7 +516,7 @@
     ctx.lineTo(w, 70); ctx.closePath(); ctx.fillStyle = R.rgba(th.bg, 0.8); ctx.fill();
     ctx.restore();
     R.rr(ctx, 0, 0, w, h, 18);
-    R.neonStroke(ctx, lock ? '#555a7a' : (focus ? '#ffffff' : th.accent), 2 + a.h + (focus ? 0.5 : 0), !lock);
+    R.neonStroke(ctx, lock ? '#555a7a' : (focus ? '#ffffff' : (sel.hard ? HARD_COL : th.accent)), 2 + a.h + (focus ? 0.5 : 0), !lock);
     // 글자 크기 3단계: 이름 22 · 퍼센트 36 · 나머지 14
     if (lock) {
       // 잠긴 카드: 이름 + 자물쇠 + 해금 조건만(뒤에 다른 내용이 비치지 않게)
@@ -532,9 +533,9 @@
     if (sv.done) { R.rr(ctx, w - 74, 11, 62, 24, 12); ctx.fillStyle = '#3dffb0'; ctx.fill(); R.txt(ctx, 'CLEAR', w - 43, 23, 14, '#04140c', { weight: 900 }); }
     R.glowText(ctx, lv.name || lv.id, w / 2, 98, 22, '#ffffff', { glow: 0.4, weight: 800 });
     // 난이도
-    const dc = DIFF_COL[Math.min(4, i)];
+    const dc = sel.hard ? HARD_COL : DIFF_COL[Math.min(4, i)];
     stars(ctx, w / 2, 130, i + 1, 5, 18, dc);
-    R.txt(ctx, DIFF[Math.min(4, i)], w / 2, 154, 14, dc, { weight: 900, stroke: 3 });
+    R.txt(ctx, sel.hard ? 'HARD · 속도 ×' + ((G.HARD_SCALE && G.HARD_SCALE[lv.id]) || 1.25) : DIFF[Math.min(4, i)], w / 2, 154, 14, dc, { weight: 900, stroke: 3 });
     // 최고 %
     const best = sel.practice ? (sv.practiceBest || 0) : (sv.best || 0);
     num(ctx, best + '%', w / 2, 192, 36, sel.practice ? '#5dff7a' : '#ffffff', { weight: 900, glow: 0.5 });
@@ -554,6 +555,7 @@
     enter(p) {
       sel.t = 0; sel.settings = false; sel.setT = 0;
       if (p && p.practice != null) sel.practice = !!p.practice;
+      if (p && p.hard != null) sel.hard = !!p.hard;
       const L = levels();
       if (p && p.focus != null) sel.focus = p.focus;
       else { let f = 0; for (let i = 0; i < L.length; i++) if (unlocked(i)) f = i; sel.focus = f; }
@@ -586,6 +588,10 @@
         if (FX()) FX().uiBurst(px + pw - 40, hy + BTN_H / 2, sel.practice ? '#5dff7a' : '#29f0ff', 10);
       }, { color: pcol, fg: pon ? '#5dff7a' : '#d4d7ee', size: 18, on: pon, trail: switchIcon(pon, '#5dff7a'), pad: 6 });
       button(ctx, 'gear', W - ER - gw, hy, gw, BTN_H, '', () => { sel.settings = true; A.sfx('click'); }, { icon: gearIcon, color: '#8a90b8', fg: '#ffffff', pad: 6 });
+      // 난이도: 노말 / 하드
+      const dw = 104, dx = px - 12 - dw * 2;
+      button(ctx, 'd_normal', dx, hy, dw, BTN_H, '노말', () => { if (sel.hard) { sel.hard = false; A.sfx('click'); } }, { primary: !sel.hard, color: '#29f0ff', size: 18, pad: 4 });
+      button(ctx, 'd_hard', dx + dw, hy, dw, BTN_H, '하드', () => { if (!sel.hard) { sel.hard = true; A.sfx('click'); if (FX()) FX().uiBurst(dx + dw * 1.5, hy + BTN_H / 2, HARD_COL, 12); } }, { primary: sel.hard, color: HARD_COL, size: 18, pad: 4 });
       ctx.restore();
       // 카드
       const L = levels();
@@ -612,7 +618,7 @@
       const sd = G.save && G.save.data;
       if (sd && L.length) {
         let clr = 0, coins = 0;
-        for (const lv of L) { const s = lvSave(lv); if (s.done) clr++; coins += (s.coins || []).filter(Boolean).length; }
+        for (const lv0 of L) { const s = lvSave(sel.hard && G.hardLevel ? G.hardLevel(lv0) : lv0); if (s.done) clr++; coins += (s.coins || []).filter(Boolean).length; }
         const fy = H - EB - 26, ft = eoc((t - 0.5) / 0.4);
         ctx.globalAlpha = ft;
         R.rr(ctx, W / 2 - 260, fy - 22, 520, 44, R_BTN); ctx.fillStyle = 'rgba(8,10,30,0.75)'; ctx.fill();
@@ -652,6 +658,7 @@
       else if (code === 'Enter' || code === 'Space') playLevel(sel.focus);
       else if (code === 'Escape' || code === 'Backspace') { A.sfx('back'); nav('title'); }
       else if (code === 'KeyP') { sel.practice = !sel.practice; A.sfx('click'); }
+      else if (code === 'KeyH') { sel.hard = !sel.hard; A.sfx('click'); }
       else if (/^Digit[1-9]$/.test(code)) { const i = +code.slice(5) - 1; if (i < n) { sel.focus = i; playLevel(i); } }
     },
   };
@@ -717,7 +724,7 @@
     if (!G.save || !G.save.data || G.save.data.music !== false) {
       A.duck(false);
       A.layer(0); // start 전에: 새 곡 노드가 레이어 0으로 생성되게(이전 판의 레이어 3이 잠깐 울리는 것 방지)
-      A.start(track(), pl.run.state.t || 0);
+      A.start(track(), pl.run.state.t || 0, pl.level.tscale || 1);
     }
     if (cp && FX()) { const c = center(pl.run.state); FX().respawn(c.x, c.y); }
   }
@@ -789,7 +796,7 @@
     pl.jumps = 0;
     persist();
     pl.result = {
-      level: pl.li, attempts: pl.attempt, time, practice: pl.practice, firstClear,
+      level: pl.li, hard: !!pl.hard, attempts: pl.attempt, time, practice: pl.practice, firstClear,
       coins: (st.coins || [false, false, false]).slice(), newCoins, savedCoins: (sv.coins || []).slice(),
       bestTime: sv.bestTime,
       score, maxCombo, newBestScore, bestScore: sv.bestScore,
@@ -860,7 +867,7 @@
     pl.paused = false;
     A.sfx('click');
     if (pl.run && !pl.run.state.dead && (!G.save || !G.save.data || G.save.data.music !== false)) {
-      A.start(track(), pl.run.state.t || 0);
+      A.start(track(), pl.run.state.t || 0, pl.level.tscale || 1);
       pl.layer = -1; setLayer();
     }
   }
@@ -911,7 +918,7 @@
     const ly = by + 5, mw = G.textW(mode, 16, 900), nw = numW(pl.attempt, 17, 900);
     R.txt(ctx, mode, EL, ly, 16, mc, { align: 'left', weight: 900, stroke: 4 });
     num(ctx, pl.attempt, EL + mw, ly, 17, mc, { align: 'left', weight: 900, stroke: 4 });
-    R.txt(ctx, '·  ' + (lv.name || lv.id), EL + mw + nw + 10, ly, 16, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700, stroke: 4, maxW: bx - 16 - (EL + mw + nw + 10) });
+    R.txt(ctx, '·  ' + (lv.hard ? '[HARD] ' : '') + (lv.name || lv.id), EL + mw + nw + 10, ly, 16, 'rgba(255,255,255,0.7)', { align: 'left', weight: 700, stroke: 4, maxW: bx - 16 - (EL + mw + nw + 10) });
     for (let i = 0; i < 3; i++) {
       pl.coinPop[i] = Math.max(0, pl.coinPop[i] - lastDt * 2.5);
       const got = st.coins && st.coins[i];
@@ -1017,7 +1024,9 @@
       p = p || {};
       const L = levels();
       pl.li = typeof p.level === 'number' ? p.level : Math.max(0, L.findIndex(l => l.id === p.level));
+      pl.hard = !!p.hard;
       pl.level = L[pl.li] || null;
+      if (pl.level && pl.hard && G.hardLevel) pl.level = G.hardLevel(pl.level);
       pl.practice = !!p.practice;
       pl.paused = false; pl.err = null; pl.death = null; pl.checkpoints = []; pl.sessionAttempts = 0; pl.result = null; pl.jumps = 0;
       pl.cam = RN().newCam(); pl.pctShown = 0; pl.run = null;
@@ -1083,7 +1092,7 @@
       if (pl.completeT >= 0) {
         const k = eob(pl.completeT / 0.4);
         ctx.save(); ctx.translate(W / 2, H / 2 - 50); ctx.scale(k, k); ctx.rotate(-0.04);
-        R.glowText(ctx, pl.practice ? 'PRACTICE CLEAR!' : 'LEVEL COMPLETE!', 0, 0, 64, '#ffe14d', { glow: 1 });
+        R.glowText(ctx, pl.practice ? 'PRACTICE CLEAR!' : (pl.hard ? 'HARD CLEAR!' : 'LEVEL COMPLETE!'), 0, 0, 64, pl.hard ? HARD_COL : '#ffe14d', { glow: 1 });
         ctx.restore();
       }
       if (pl.paused) drawPause(ctx);
@@ -1295,9 +1304,9 @@
         const bw = 200, bg2 = 16;
         const n = hasNext ? 3 : 2, bx0 = W / 2 - (n * bw + (n - 1) * bg2) / 2;
         let bi = 0;
-        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, BTN_H, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
-        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, BTN_H, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
-        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, BTN_H, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level }); }, { color: '#ff3df2', size: 22 });
+        if (hasNext) { button(ctx, 'c_next', bx0, by, bw, BTN_H, '다음 레벨 ▶', () => { A.sfx('click'); nav('play', { level: r.level + 1, practice: false, hard: r.hard }); }, { primary: true, color: '#3dffb0', size: 22 }); bi++; }
+        button(ctx, 'c_retry', bx0 + bi * (bw + bg2), by, bw, BTN_H, '다시', () => { A.sfx('click'); nav('play', { level: r.level, practice: r.practice, hard: r.hard }); }, { primary: !hasNext, color: '#29f0ff', size: 22 }); bi++;
+        button(ctx, 'c_select', bx0 + bi * (bw + bg2), by, bw, BTN_H, '레벨 선택', () => { A.sfx('back'); nav('select', { focus: hasNext ? r.level + 1 : r.level, hard: r.hard }); }, { color: '#ff3df2', size: 22 });
         button(ctx, 'c_share', W / 2 - 130, by + 62, 260, 46, '기록 카드 공유 / 저장', () => { A.sfx('click'); shareCard(); }, { color: '#ffcf3d', size: 18 });
         ctx.restore();
       }
@@ -1310,11 +1319,11 @@
       if (!down || busy() || cp.t < 0.8) return;
       const r = cp.r, L = levels();
       if (code === 'Enter' || code === 'Space') {
-        if (L[r.level + 1] && unlocked(r.level + 1)) nav('play', { level: r.level + 1 });
-        else nav('play', { level: r.level, practice: r.practice });
+        if (L[r.level + 1] && unlocked(r.level + 1)) nav('play', { level: r.level + 1, hard: r.hard });
+        else nav('play', { level: r.level, practice: r.practice, hard: r.hard });
         A.sfx('click');
-      } else if (code === 'KeyR') { A.sfx('click'); nav('play', { level: r.level, practice: r.practice }); }
-      else if (code === 'Escape') { A.sfx('back'); nav('select', { focus: r.level }); }
+      } else if (code === 'KeyR') { A.sfx('click'); nav('play', { level: r.level, practice: r.practice, hard: r.hard }); }
+      else if (code === 'Escape') { A.sfx('back'); nav('select', { focus: r.level, hard: r.hard }); }
     },
   };
 
